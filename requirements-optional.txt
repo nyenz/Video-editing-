@@ -1,3 +1,3 @@
 # Optional add-ons. EditForge runs without them and tells you what is switched off.
 faster-whisper>=1.0      # automatic captions (downloads a model file once)
-opencv-python-headless>=4.8   # face tracking and face-following re-frame
+opencv-python-headless>=4.8,<5   # face tracking and face-following re-frame

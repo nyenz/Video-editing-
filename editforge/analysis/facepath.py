@@ -254,7 +254,10 @@ def detect_faces(path: str, start: float, end: float, src_w: int, src_h: int, sa
         import numpy as np  # type: ignore
     except Exception:
         raise FeatureUnavailable("Face tracking is switched off because the free 'opencv-python-headless' add-on is not installed.",
-                                 "Install it with:  pip install opencv-python-headless   -- or use  reframe 9:16 mode=center")
+                                 "Install it with:  pip install 'opencv-python-headless<5'   -- or use  reframe 9:16 mode=center")
+    if not hasattr(cv2, "CascadeClassifier"):
+        raise FeatureUnavailable("Face tracking does not work with OpenCV 5, which is what is installed.",
+                                 "Install the older one with:  pip install \"opencv-python-headless<5\"   -- or use  reframe 9:16 mode=center")
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     w = width - width % 2
     h = max(2, int(round(w * src_h / src_w / 2)) * 2)

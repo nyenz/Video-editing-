@@ -301,7 +301,7 @@ def cmd_features(args: argparse.Namespace) -> int:
         ("Beat and downbeat detection", True, "built in (uses FFmpeg only)"),
         ("Scene detection", True, "built in (FFmpeg's scene score)"),
         ("Automatic captions (Whisper)", whisper_available(), "pip install faster-whisper"),
-        ("Face tracking and face-following re-frame", opencv_available(), "pip install opencv-python-headless"),
+        ("Face tracking and face-following re-frame", opencv_available(), "pip install 'opencv-python-headless<5'"),
         ("Memory measurement", memory_measurement_available(), "pip install psutil"),
         ("Text on screen (drawtext)", tools.has_filter("drawtext"), "needs an FFmpeg build with freetype"),
         ("Burned-in captions (ass)", tools.has_filter("ass"), "needs an FFmpeg build with libass"),

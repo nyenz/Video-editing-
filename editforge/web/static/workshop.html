@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ef-token" content="{{TOKEN}}">
+<title>EditForge - Clip workshop</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/workshop.css">
+</head>
+<body>
+<header>
+  <h1>EditForge</h1>
+  <span class="sub">free video editing on your own computer &middot; version {{VERSION}}</span>
+  <nav class="tabs">
+    <a class="tab on" href="/">Clip workshop</a>
+    <a class="tab" href="/advanced">Advanced (type a script)</a>
+  </nav>
+</header>
+<main>
+  <section id="step1" class="card">
+    <h2><span class="num">1</span> Choose a video</h2>
+    <div id="drop" class="drop" tabindex="0">Drop a video here, or <label class="link">choose a file<input type="file" id="file" accept="video/*,audio/*,.mkv,.mov,.avi,.ts" hidden></label></div>
+    <progress id="uploadBar" max="100" value="0" hidden></progress>
+    <div id="uploadStatus" class="note" aria-live="polite"></div>
+    <label class="pick">Or open one you used before: <select id="fileList"></select></label>
+    <details class="note"><summary>Very big video? (faster than uploading)</summary>
+      <span id="mediaNote"></span>
+    </details>
+  </section>
+
+  <section id="step2" class="card" hidden>
+    <h2><span class="num">2</span> Find the part you want</h2>
+    <div id="fileFacts" class="note"></div>
+    <div id="previewBox" class="previewBox" hidden>
+      <span id="previewText"></span>
+      <progress id="previewBar" max="100" value="0"></progress>
+    </div>
+    <div class="stage"><video id="player" controls playsinline preload="metadata"></video></div>
+    <div id="track" class="track" title="Click anywhere to jump there">
+      <div id="trackClips"></div>
+      <div id="trackSel" class="sel" hidden></div>
+      <div id="trackHead" class="head"></div>
+    </div>
+    <div class="row center">
+      <button data-step="-10" title="Back 10 seconds">&laquo; 10s</button>
+      <button data-step="-1" title="Back 1 second">&lsaquo; 1s</button>
+      <button data-frame="-1" title="Back one frame">&lsaquo; frame</button>
+      <button id="playBtn" class="secondary wide">Play</button>
+      <button data-frame="1" title="Forward one frame">frame &rsaquo;</button>
+      <button data-step="1" title="Forward 1 second">1s &rsaquo;</button>
+      <button data-step="10" title="Forward 10 seconds">10s &raquo;</button>
+    </div>
+    <div class="now">Now at <b id="nowTime">0:00.000</b> <span class="note">of <span id="totalTime">0:00</span></span></div>
+
+    <div class="marks">
+      <div class="mark">
+        <button id="setStart" class="primary">Set START here</button>
+        <label>Start <input id="startIn" type="text" inputmode="decimal" autocomplete="off" placeholder="0:00"></label>
+        <button id="goStart" class="small" title="Jump to the start mark">Go</button>
+      </div>
+      <div class="mark">
+        <button id="setEnd" class="primary">Set END here</button>
+        <label>End <input id="endIn" type="text" inputmode="decimal" autocomplete="off" placeholder="0:00"></label>
+        <button id="goEnd" class="small" title="Jump to the end mark">Go</button>
+      </div>
+    </div>
+    <div class="row">
+      <span>Length: <b id="selLen">-</b></span>
+      <button id="playSel" class="secondary">Play this part</button>
+      <button id="addClip" class="primary">+ Add clip</button>
+      <span id="markNote" class="note" aria-live="polite"></span>
+    </div>
+    <details class="note"><summary>Keyboard shortcuts</summary>
+      Space = play/pause &middot; I = set start &middot; O = set end &middot; Enter = add clip &middot; Left/Right arrow = 1 second &middot; , and . = one frame
+    </details>
+  </section>
+
+  <section id="step3" class="card" hidden>
+    <h2><span class="num">3</span> Your clips</h2>
+    <div id="clips"></div>
+    <div id="clipTotals" class="note"></div>
+    <div class="row">
+      <label>Quality:
+        <select id="quality">
+          <option value="best">Best (bigger file)</option>
+          <option value="high">High</option>
+          <option value="small">Smaller file</option>
+        </select>
+      </label>
+      <label class="inline"><input type="radio" name="mode" value="separate" checked> One video per clip</label>
+      <label class="inline"><input type="radio" name="mode" value="join"> Join all clips into one video</label>
+    </div>
+    <div class="row">
+      <button id="makeBtn" class="primary">Make the clips</button>
+      <button id="clearBtn" class="secondary">Remove all clips</button>
+      <span id="makeNote" class="note" aria-live="polite"></span>
+    </div>
+    <div class="note">Clips are cut from your original video, exact to the frame, so the quality stays high.</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">4</span> Finished videos</h2>
+    <div id="jobs"></div>
+  </section>
+</main>
+<footer>Everything runs on this computer. Nothing is sent anywhere.</footer>
+<script src="/static/workshop.js"></script>
+</body>
+</html>

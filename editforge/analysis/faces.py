@@ -10,10 +10,14 @@ from typing import Any, Callable, List, Optional
 
 
 def opencv_available() -> bool:
-    """True if OpenCV can be imported."""
+    """True if a usable OpenCV is installed.
+
+    OpenCV 5 removed the face detector EditForge uses (``CascadeClassifier``), so version 5
+    counts as "not available" instead of crashing in the middle of an edit.
+    """
     try:
-        import cv2  # noqa: F401
-        return True
+        import cv2
+        return hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data")
     except Exception:
         return False
 

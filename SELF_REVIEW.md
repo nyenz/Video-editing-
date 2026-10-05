@@ -1,5 +1,20 @@
 # Self review (honest)
 
+## Version 1.1.0 (Clip workshop) - what was and was not checked
+* Ran in one pass on Linux, FFmpeg 6.1.1, Python 3.13, 2 CPUs: **606 passed, 5 failed, 4 skipped**. The 5 failures are the same ones
+  as in 1.0.0: three beat/bar tests, and two tests (resume after cancel, memory "+40 MB") that only pass on a 1-CPU machine.
+  Resume itself works when the settings are the same (checked by killing a 150-cut render and running it again: 52 pieces reused).
+* The workshop page was driven end to end in a real Chromium browser with a WebM video: upload, play, jump, frame steps, set start/end,
+  typed times, keyboard shortcuts, "Play this part", one video per clip, joined video, reload (clips remembered), "Edit this video".
+  Clip lengths were checked with ffprobe and were exact to the frame.
+* **Not checked:** playing H.264/MP4 in the page. The test browser has no H.264 support, so only the "light copy" switch-over logic ran
+  there, not the picture. Chrome and Edge play H.264, but that was not seen here.
+* **Not checked:** Windows and Mac (launchers, paths), a 4-hour file in the page, and uploads of many gigabytes through the browser.
+* The clip list is remembered in the browser only (per video). It is not yet a saved project on disk.
+* Joined clips always come out in time order, not in the order you added them.
+
+## Version 1.0.0 notes (unchanged below)
+
 This release was packaged early at the user's request, before the planned test suite and docs were finished.
 
 ## What was actually run (real FFmpeg, generated media, in the build sandbox)

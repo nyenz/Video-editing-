@@ -13,8 +13,18 @@ EditForge makes the video. No accounts, no cloud, no tracking, nothing is sent a
 
 The launchers check for FFmpeg and tell you how to install it if it is missing.
 
-## Your first edit
-In the web page: drop a video in step 1, pick an example in step 2 (or type), press **Show the plan**, then **Make the video**. Download it when the bar reaches 100%.
+## Your first clips (no typing)
+The page that opens is the **Clip workshop**:
+1. **Choose a video.** Drop it on the page, or click "choose a file".
+2. **Find the part you want.** Play the video. Press **Set START here** where the part begins and **Set END here** where it ends, then **+ Add clip**. Repeat for every part you want.
+3. **Make the clips.** Choose "One video per clip" or "Join all clips into one video", then press **Make the clips**.
+4. **Finished videos** appear at the bottom. Press **Watch** to check one, **Save to my computer** to keep it, or **Edit this video** to cut it again.
+
+Use Google Chrome or Microsoft Edge. If a video will not play, EditForge makes a light copy for watching; your clips are still cut from the original, so quality is not lost.
+For a very big video, copy it into the EditForge media folder (the page shows where) instead of dropping it on the page.
+
+## Your first scripted edit
+Click **Advanced (type a script)** at the top. Drop a video in step 1, pick an example in step 2 (or type), press **Show the plan**, then **Make the video**. Download it when the bar reaches 100%.
 
 Or in a terminal:
 ```
@@ -51,7 +61,7 @@ Presets: `original`, `youtube_1080p`, `youtube_4k`, `shorts` (also reels, tiktok
 Exact (default): frame-accurate, the picture is re-encoded. `--fast-cuts`: no re-encoding, very fast, but each cut moves to the nearest keyframe, so the result can start earlier and end later than you asked, and it cannot be combined with picture changes.
 
 ## Optional add-ons (EditForge works without them and says what is switched off)
-`pip install faster-whisper` (automatic captions; downloads a model file once, then works offline) - `pip install opencv-python-headless` (face-following re-frame). Run `editforge features` to see what is on.
+`pip install faster-whisper` (automatic captions; downloads a model file once, then works offline) - `pip install "opencv-python-headless<5"` (face-following re-frame). Run `editforge features` to see what is on.
 
 ## Real limitations
 * Memory stays flat with the number of cuts and was measured under 300 MB up to 1080p; 4K needs more.

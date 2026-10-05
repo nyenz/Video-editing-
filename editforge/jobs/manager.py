@@ -118,7 +118,9 @@ class JobManager:
             if not job["output_path"]:
                 out_dir = Path(opts.get("output_dir") or (home_dir() / "outputs")) / job_id
                 out_dir.mkdir(parents=True, exist_ok=True)
-                plan.output_path = str(out_dir / Path(plan.output_path).name)
+                made = Path(plan.output_path)
+                name = (str(opts["output_name"]) + made.suffix) if opts.get("output_name") else made.name
+                plan.output_path = str(out_dir / name)
                 self.store.update(job_id, output_path=plan.output_path)
             self.store.update(job_id, plan={"duration": plan.timeline.duration, "segments": len(plan.timeline.segments),
                                             "summary": plan.summary(), "warnings": plan.warnings})

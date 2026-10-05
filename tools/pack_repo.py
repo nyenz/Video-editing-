@@ -41,7 +41,7 @@ def tree(name, files):
 def main(root, dest):
     name = os.path.basename(os.path.abspath(root))
     files = collect(root)
-    parts = ["# EditForge v1.0.0 -- Complete Repository Source\n",
+    parts = ["# EditForge -- Complete Repository Source\n",
              "This document contains every non-generated repository/source file in EditForge. Generated runtime artifacts are excluded.\n",
              "## REPOSITORY TREE\n", "```text\n" + tree(name, files) + "\n```\n", "## REPOSITORY FILES\n"]
     for rel in files:

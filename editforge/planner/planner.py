@@ -915,7 +915,7 @@ class Planner:
             if modes & {"face", "speaker"}:
                 raise FeatureUnavailable(
                     "Face-following re-framing is switched off because the free 'opencv-python-headless' add-on is not installed.",
-                    "Install it with:  pip install opencv-python-headless   -- or use  reframe 9:16 mode=center")
+                    "Install it with:  pip install 'opencv-python-headless<5'   -- or use  reframe 9:16 mode=center")
             if any(st.args.get("mode") == "auto" for st in self.script.steps_named("reframe")):
                 self.notes.append("Re-framing uses the centre of the picture (face tracking is off: opencv is not installed).")
             return

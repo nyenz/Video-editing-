@@ -34,13 +34,19 @@ from ..jobs.manager import JobManager
 from ..jobs.store import JobStore
 from ..presets.presets import PRESETS
 from ..version import __version__
+from .preview import PreviewMaker
 
 STATIC_DIR = Path(__file__).parent / "static"
-STATIC_FILES = {"app.js": "application/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}
+STATIC_FILES = {"app.js": "application/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8",
+                "workshop.js": "application/javascript; charset=utf-8", "workshop.css": "text/css; charset=utf-8"}
+PAGES = {"/": "workshop.html", "/advanced": "index.html"}
+MAX_CLIPS = 200
+MIN_CLIP_SECONDS = 0.04
+CLIP_QUALITIES = {"best": "best", "high": "high", "small": "medium"}
 MAX_JSON = 2 * 1024 * 1024
 MAX_UPLOAD = 20 * 1024 ** 3
 SAFE_NAME = re.compile(r"[^\w.\- ()\[\]]", re.UNICODE)
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 
 
@@ -76,7 +82,9 @@ class AppState:
             d.mkdir(parents=True, exist_ok=True)
         self.uploads, self.outputs, self.media = self.uploads.resolve(), self.outputs.resolve(), self.media.resolve()
         self.store = JobStore(self.home / "jobs.sqlite3")
-        roots = [str(self.uploads), str(self.media)]
+        self.previews = PreviewMaker(self.home / "previews")
+        # Finished videos can be opened again as a new source ("save, then edit the result").
+        roots = [str(self.uploads), str(self.media), str(self.outputs)]
         if examples_dir().exists():
             roots.append(str(examples_dir().resolve()))
         self.allowed_roots = roots
@@ -87,10 +95,11 @@ class AppState:
         return sorted(h)
 
     def resolve_input(self, ident: str) -> str:
-        """Turn a file id from the page ('u/<id>/<name>' or 'm/<name>') into a real path inside our folders."""
-        m = re.fullmatch(r"u/([0-9a-f]{12})/([^/\\]+)", ident or "")
+        """Turn a file id from the page ('u/<id>/<name>', 'o/<job>/<name>' or 'm/<name>') into a real path inside our folders."""
+        m = re.fullmatch(r"([uo])/([0-9a-f]{12})/([^/\\]+)", ident or "")
         if m:
-            root, path = self.uploads, self.uploads / m.group(1) / m.group(2)
+            root = self.uploads if m.group(1) == "u" else self.outputs
+            path = root / m.group(2) / m.group(3)
         else:
             m = re.fullmatch(r"m/([^/\\]+)", ident or "")
             if not m:
@@ -107,8 +116,24 @@ class AppState:
             raise EditForgeError("I can't find that file any more.", "Upload it again.")
         return str(real)
 
+    def output_id(self, job: Dict[str, Any]) -> Optional[str]:
+        """The file id of a finished job's video, or None if it is not there."""
+        if job.get("status") != "done" or not job.get("output_path"):
+            return None
+        path = Path(job["output_path"])
+        try:
+            path.resolve().relative_to(self.outputs / job["id"])
+        except (ValueError, OSError):
+            return None
+        return f"o/{job['id']}/{path.name}" if path.is_file() else None
+
     def list_files(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
+        for job in self.store.list(60):
+            ident = self.output_id(job)
+            if ident:
+                f = Path(job["output_path"])
+                out.append({"id": ident, "name": f.name, "size": f.stat().st_size, "where": "made here"})
         for d in sorted(self.uploads.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if self.uploads.exists() else []:
             if d.is_dir() and re.fullmatch(r"[0-9a-f]{12}", d.name):
                 for f in d.iterdir():
@@ -204,13 +229,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path
         try:
-            if path == "/":
+            if path in PAGES:
                 if self._guard(need_token=False) is None:
                     return
-                html = (STATIC_DIR / "index.html").read_text(encoding="utf-8").replace("{{TOKEN}}", self.state.token).replace("{{VERSION}}", __version__)
+                html = (STATIC_DIR / PAGES[path]).read_text(encoding="utf-8").replace("{{TOKEN}}", self.state.token).replace("{{VERSION}}", __version__)
                 body = html.encode("utf-8")
                 self._headers(200, "text/html; charset=utf-8", len(body))
                 self.wfile.write(body)
+            elif path == "/favicon.ico":
+                self._headers(204, "image/x-icon", 0)
             elif path.startswith("/static/"):
                 if self._guard(need_token=False) is None:
                     return
@@ -240,7 +267,26 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/jobs":
                 if self._guard() is None:
                     return
-                self._json({"jobs": self.state.store.list(30)})
+                jobs = self.state.store.list(60)
+                for job in jobs:
+                    job["file_id"] = self.state.output_id(job)
+                self._json({"jobs": jobs})
+            elif path == "/api/info":
+                query = self._guard()
+                if query is None:
+                    return
+                src = self.state.resolve_input((query.get("id") or [""])[0])
+                info = probe_media(src).to_dict()
+                info.pop("path", None)
+                info["preview"] = self.state.previews.status(src) if info["has_video"] else {"state": "none", "progress": 0.0, "error": ""}
+                self._json(info)
+            elif path == "/api/preview":
+                query = self._guard()
+                if query is None:
+                    return
+                self._json(self.state.previews.status(self.state.resolve_input((query.get("id") or [""])[0])))
+            elif path == "/media":
+                self._media()
             elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}", path):
                 if self._guard() is None:
                     return
@@ -273,6 +319,16 @@ class Handler(BaseHTTPRequestHandler):
                 inp = self.state.resolve_input(data["input"]) if data.get("input") else None
                 self._json(validate_script(str(data.get("script", "")), inp, base_dir=str(self.state.media),
                                            allowed_roots=self.state.allowed_roots))
+            elif path == "/api/preview":
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json(self.state.previews.start(self.state.resolve_input(str(data.get("input", "")))), 202)
+            elif path == "/api/clips":
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json({"jobs": self._make_clips(data)}, 201)
             elif path == "/api/plan":
                 data = self._read_json()
                 if data is None:
@@ -340,6 +396,95 @@ class Handler(BaseHTTPRequestHandler):
         script = read_script(str(data.get("script", "")))
         return prepare(script, input_path=inp, preset=o.get("preset"), quality=o.get("quality"), fast_cuts=o.get("fast_cuts"),
                        preview=bool(o.get("preview")), base_dir=str(self.state.media), allowed_roots=self.state.allowed_roots)
+
+    def _make_clips(self, data: Dict[str, Any]) -> List[str]:
+        """Start one job per marked clip (or one job that joins them) and return the job ids.
+
+        Clips are always cut from the ORIGINAL file, frame-exact, never from the preview copy.
+        """
+        if not data.get("input"):
+            raise EditForgeError("No video was chosen.", "Choose a video in step 1 first.")
+        src = self.state.resolve_input(str(data["input"]))
+        info = probe_media(src)
+        raw = data.get("clips")
+        if not isinstance(raw, list) or not raw:
+            raise EditForgeError("There are no clips to make.", "Mark a start and an end, then press 'Add clip'.")
+        if len(raw) > MAX_CLIPS:
+            raise EditForgeError(f"That is more than {MAX_CLIPS} clips at once.", "Make them in smaller groups.")
+        clips: List[Tuple[float, float, str]] = []
+        for n, c in enumerate(raw, 1):
+            try:
+                start, end = float(c["start"]), float(c["end"])
+            except (TypeError, ValueError, KeyError):
+                raise EditForgeError(f"Clip {n} has a start or end that is not a time.", "Delete that clip and mark it again.")
+            if not (start == start and end == end):  # NaN
+                raise EditForgeError(f"Clip {n} has a start or end that is not a time.", "Delete that clip and mark it again.")
+            start, end = max(0.0, start), min(end, info.duration)
+            if end - start < MIN_CLIP_SECONDS:
+                raise EditForgeError(f"Clip {n} is empty or too short (the end must come after the start).",
+                                     "Move the end later, or delete that clip.")
+            name = clean_filename(str(c.get("name") or ""), default=f"clip{n:02d}").rsplit(".", 1)[0][:60] or f"clip{n:02d}"
+            clips.append((start, end, name))
+        quality = CLIP_QUALITIES.get(str(data.get("quality") or "best"), "best")
+        stem = Path(src).stem[:60]
+        base = {"quality": quality, "output_dir": str(self.state.outputs), "preview": False, "fast_cuts": None}
+        if data.get("join"):
+            clips.sort()
+            script = "keep " + ", ".join(f"{a:.3f}-{b:.3f}" for a, b, _ in clips)
+            return [self.state.manager.submit(script, src, "", dict(base, output_name=f"{stem}_joined"))]
+        return [self.state.manager.submit(f"keep {a:.3f}-{b:.3f}", src, "", dict(base, output_name=f"{stem}_{name}"))
+                for a, b, name in clips]
+
+    def _media(self) -> None:
+        """Send a video/audio file to the page's player, with support for jumping around (HTTP Range)."""
+        query = self._guard(query_token=True)
+        if query is None:
+            return
+        try:
+            src = self.state.resolve_input((query.get("id") or [""])[0])
+        except EditForgeError as exc:
+            self._error(404, exc.message, exc.fix)
+            return
+        path = Path(src)
+        if (query.get("preview") or [""])[0] == "1":
+            path = self.state.previews.path_for(src)
+            if not path.is_file():
+                self._error(404, "The preview copy is not ready yet.")
+                return
+        size = path.stat().st_size
+        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        start, end, status = 0, size - 1, 200
+        rng = self.headers.get("Range")
+        if rng:
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng.strip())
+            if not m or (not m.group(1) and not m.group(2)):
+                self._headers(416, ctype, 0, {"Content-Range": f"bytes */{size}"})
+                return
+            if m.group(1):
+                start = int(m.group(1))
+                end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+            else:
+                start = max(0, size - int(m.group(2)))
+            if start > end or start >= size:
+                self._headers(416, ctype, 0, {"Content-Range": f"bytes */{size}"})
+                return
+            status = 206
+        extra = {"Accept-Ranges": "bytes"}
+        if status == 206:
+            extra["Content-Range"] = f"bytes {start}-{end}/{size}"
+        self._headers(status, ctype, end - start + 1, extra)
+        remaining = end - start + 1
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(start)
+                while remaining > 0:
+                    chunk = fh.read(min(256 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the player stopped reading (normal when you jump to another time)
 
     def _examples(self) -> List[Dict[str, str]]:
         out = []
@@ -455,5 +600,6 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True, 
         print("\nStopping...")
     finally:
         state.manager.shutdown()
+        state.previews.shutdown()
         srv.server_close()
     return 0

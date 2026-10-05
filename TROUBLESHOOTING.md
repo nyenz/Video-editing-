@@ -12,7 +12,7 @@ Every error EditForge shows has a "How to fix" line. Add `--verbose` to see tech
 
 **Automatic captions are "switched off"** - install the add-on (`pip install faster-whisper`); the first use of a model downloads it once (needs internet once). Or give your own subtitle file: `captions transcript=talk.srt`.
 
-**Face following is "switched off"** - `pip install opencv-python-headless`, or use `reframe 9:16 mode=center`.
+**Face following is "switched off"** - `pip install "opencv-python-headless<5"`, or use `reframe 9:16 mode=center`.
 
 **A cut is in the wrong place with --fast-cuts** - that is how fast cuts work (cuts snap to keyframes). Leave `--fast-cuts` off for frame-exact cuts.
 

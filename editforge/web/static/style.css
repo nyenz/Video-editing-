@@ -26,6 +26,6 @@ table { width:100%; border-collapse:collapse; font-size:13px; } th, td { text-al
 .job { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:8px 0; }
 .job .top { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; } .job .st { font-weight:600; }
 .st.done { color:var(--ok); } .st.failed { color:var(--bad); } .st.running { color:var(--accent); }
-progress { width:100%; height:12px; } .job .err { color:var(--bad); margin-top:6px; } .job .acts { display:flex; gap:8px; margin-top:8px; }
+progress { width:100%; height:12px; } .job .err { color:var(--bad); margin-top:6px; } .job .acts { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 a.button { display:inline-block; padding:7px 14px; border-radius:8px; background:var(--accent); color:#fff; text-decoration:none; }
 footer { text-align:center; color:var(--muted); padding:0 0 30px; font-size:13px; }
