@@ -1,0 +1,4 @@
+# Join highlights with a crossfade
+keep 0:05-0:12, 0:40-0:47, 1:30-1:37
+transition crossfade 0.6
+fade in=1 out=1.5

@@ -1,0 +1,3 @@
+# Split at scene changes and mirror every 2nd scene
+scene_cut threshold=0.3
+every_nth 2 effect=mirror

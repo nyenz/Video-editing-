@@ -1,0 +1,3 @@
+# Gradually speed up, then hold a frame
+speed_ramp 1 to 3 from 5 to 9
+freeze at=12 duration=2

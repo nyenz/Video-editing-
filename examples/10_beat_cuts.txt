@@ -1,0 +1,3 @@
+# Cut on the beat of the soundtrack and flash on every bar
+beat_cut every=4 take=0.5
+beat_effect flash on=downbeat

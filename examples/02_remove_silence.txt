@@ -1,0 +1,3 @@
+# Cut out the silent parts of a talk (keeps a little padding so words are not clipped)
+silence_remove threshold=-35 min_silence=0.5 padding=0.1
+loudnorm -16

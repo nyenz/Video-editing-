@@ -1,0 +1,9 @@
+{
+  "preset": "youtube_1080p",
+  "steps": [
+    {"keep": "0:10-0:40, 1:00-1:30"},
+    {"speed": {"factor": 2, "start": 20, "end": 25}},
+    {"text": {"text": "Hello", "start": "00:00:01", "end": "00:00:04"}},
+    {"loudnorm": -16}
+  ]
+}

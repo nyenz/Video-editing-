@@ -1,0 +1,4 @@
+# Make a 9:16 video for Shorts/Reels/TikTok that follows the face (needs the face add-on; use mode=center without it)
+preset shorts
+reframe 9:16 mode=auto
+loudnorm -14

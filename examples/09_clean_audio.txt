@@ -1,0 +1,3 @@
+# Reduce background noise and make the loudness standard
+denoise 15
+loudnorm -16 true_peak=-1.5

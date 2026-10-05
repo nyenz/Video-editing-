@@ -1,0 +1,2 @@
+# Burned-in karaoke captions from your own subtitle file (no add-on needed)
+captions transcript="talk.srt" style=karaoke mode=burn

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ef-token" content="{{TOKEN}}">
+<title>EditForge</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>EditForge</h1>
+  <span class="sub">free video editing on your own computer &middot; version {{VERSION}}</span>
+</header>
+<main>
+  <section id="step1" class="card">
+    <h2>1. Choose a video</h2>
+    <div id="drop" class="drop" tabindex="0">Drop a video or audio file here, or <label class="link">choose a file<input type="file" id="file" hidden></label></div>
+    <div id="uploadStatus" class="note"></div>
+    <label>Or pick one you already added: <select id="fileList"></select></label>
+    <div class="note" id="mediaNote"></div>
+  </section>
+
+  <section id="step2" class="card">
+    <h2>2. Write your edit</h2>
+    <div class="row">
+      <label>Start from an example:
+        <select id="examples"><option value="">(none)</option></select>
+      </label>
+      <label>Style:
+        <select id="preset"></select>
+      </label>
+      <label class="inline"><input type="checkbox" id="preview"> Quick small preview</label>
+      <label class="inline" title="Cuts snap to keyframes and nothing is re-encoded. Very fast, but cuts are not frame-exact."><input type="checkbox" id="fast"> Fast cuts (not frame-exact)</label>
+    </div>
+    <textarea id="script" spellcheck="false" rows="14" placeholder="Example:&#10;keep 0:10-0:40&#10;speed 2 from 15 to 20&#10;loudnorm"></textarea>
+    <div id="problems" class="problems" aria-live="polite"></div>
+    <div class="row">
+      <button id="planBtn" class="secondary">Show the plan</button>
+      <button id="runBtn" class="primary">Make the video</button>
+      <span id="actionNote" class="note"></span>
+    </div>
+  </section>
+
+  <section id="planCard" class="card" hidden>
+    <h2>Plan</h2>
+    <pre id="planSummary" class="summary"></pre>
+    <div id="timeline" class="timeline" aria-label="Timeline"></div>
+    <div id="planWarnings" class="problems"></div>
+    <details><summary>Segment table</summary><table id="planTable"><thead></thead><tbody></tbody></table></details>
+  </section>
+
+  <section class="card">
+    <h2>Your jobs</h2>
+    <div id="jobs"></div>
+  </section>
+</main>
+<footer>Everything runs on this computer. Nothing is sent anywhere. <span id="features"></span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
