@@ -227,6 +227,29 @@ def simplify(points: Sequence[Tuple[float, float]], tol: float = 0.004) -> List[
     return [p for p, k in zip(pts, keep) if k]
 
 
+def path_value(path: Sequence[Tuple[float, float]], t: float) -> float:
+    """The camera position at time ``t`` on a (time, value) path (held flat before the first and after the last point)."""
+    if t <= path[0][0]:
+        return path[0][1]
+    for (t0, v0), (t1, v1) in zip(path, path[1:]):
+        if t <= t1:
+            return v0 + (v1 - v0) * ((t - t0) / (t1 - t0) if t1 > t0 else 0.0)
+    return path[-1][1]
+
+
+def window_of_path(path: Sequence[Tuple[float, float]], lo: float, hi: float) -> List[Tuple[float, float]]:
+    """The part of a path between two times, with exact points added at both ends.
+
+    A simplified path can have two points many seconds apart (a steady camera move). Just dropping
+    the points outside the window would leave a piece in the middle of that move with nothing to
+    follow, so the camera would stand still. The end points keep the move going.
+    """
+    if not path:
+        return []
+    inside = [p for p in path if lo < p[0] < hi]
+    return [(round(lo, 4), round(path_value(path, lo), 5))] + inside + [(round(hi, 4), round(path_value(path, hi), 5))]
+
+
 def build_path(samples: Sequence[Tuple[float, Sequence[Face]]], mode: str, speech: Optional[Sequence[Tuple[float, float]]],
                smooth: float) -> Tuple[List[Tuple[float, float]], Dict[str, Any]]:
     """Full pipeline from detections to a simplified camera path. Returns (path, info)."""
@@ -336,6 +359,6 @@ def fill_reframe_paths(segs: Sequence[Any], planner: Any, analyzer: Any) -> None
         path = paths[key]
         if path:
             lo, hi = s.src_start_f / F - 1.5, (s.src_start_f + s.src_len_f) / F + 1.5
-            s.reframe = type(r)(r.aspect, want, r.smooth, [p for p in path if lo <= p[0] <= hi] or path[:1])
+            s.reframe = type(r)(r.aspect, want, r.smooth, window_of_path(path, lo, hi))
         else:
             s.reframe = type(r)(r.aspect, "center", r.smooth, None)

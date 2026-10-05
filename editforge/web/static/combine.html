@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ef-token" content="{{TOKEN}}">
+<title>EditForge - Combine</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/workshop.css">
+<link rel="stylesheet" href="/static/editor.css">
+</head>
+<body>
+<header>
+  <h1>EditForge</h1>
+  <span class="sub">free video editing on your own computer &middot; version {{VERSION}}</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Clip workshop</a>
+    <a class="tab" href="/edit">Editor</a>
+    <a class="tab on" href="/combine">Combine</a>
+    <a class="tab" href="/advanced">Advanced</a>
+  </nav>
+</header>
+<main>
+  <section class="card">
+    <h2><span class="num">1</span> Choose two videos</h2>
+    <div class="settings">
+      <label>First video <select id="fileA"></select></label>
+      <label>Second video <select id="fileB"></select></label>
+      <button id="swapBtn" class="small">Swap them</button>
+    </div>
+    <div class="row">
+      <label class="link">Add a video from my computer<input type="file" id="addFile" accept="video/*,.mkv,.mov,.avi,.ts" hidden></label>
+      <progress id="addBar" max="100" value="0" hidden></progress>
+      <span id="addStatus" class="note" aria-live="polite"></span>
+    </div>
+    <div class="note">The first video sets the picture size. The second one is resized to fit.</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span> How to combine them</h2>
+    <div class="modes" role="radiogroup" aria-label="How to combine">
+      <label class="mode"><input type="radio" name="mode" value="sequence" checked> <b>One after the other</b><span>The first plays, then the second.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="side"> <b>Side by side</b><span>Both play at once, left and right.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="stack"> <b>Top and bottom</b><span>Both play at once, one above the other.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="corner"> <b>Small one in a corner</b><span>The second plays small on top of the first.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="blend"> <b>One over the other</b><span>The second lies over the first, see-through.</span></label>
+    </div>
+    <div class="settings">
+      <label data-for="sequence">Between them
+        <select id="oTrans"><option value="none">Straight cut</option><option value="fade">Crossfade</option><option value="fadeblack">Dip to black</option><option value="slideleft">Slide</option><option value="wipeleft">Wipe</option><option value="circleopen">Circle</option></select></label>
+      <label data-for="sequence">for <select id="oTransS"><option value="0.3">0.3 s</option><option value="0.5" selected>0.5 s</option><option value="1">1 s</option><option value="2">2 s</option></select></label>
+      <label data-for="side stack">If one is longer
+        <select id="oLength"><option value="longest">Keep going (the short one holds its last picture)</option><option value="shortest">Stop when the short one ends</option></select></label>
+      <label data-for="corner">Corner
+        <select id="oCorner"><option value="bottom_right">Bottom right</option><option value="bottom_left">Bottom left</option><option value="top_right">Top right</option><option value="top_left">Top left</option></select></label>
+      <label data-for="corner">Size
+        <select id="oSize"><option value="0.2">Small</option><option value="0.3" selected>Medium</option><option value="0.45">Large</option></select></label>
+      <label data-for="blend">How see-through
+        <select id="oOpacity"><option value="0.3">Faint</option><option value="0.5" selected>Half</option><option value="0.75">Strong</option></select></label>
+      <label data-for="side stack corner blend">Sound from
+        <select id="oSound"><option value="both">Both videos</option><option value="a">First video only</option><option value="b">Second video only</option><option value="none">No sound</option></select></label>
+      <label>Quality
+        <select id="oQuality"><option value="best">Best (bigger file, slower)</option><option value="high">High</option><option value="small">Smaller file</option></select></label>
+    </div>
+    <div class="row">
+      <button id="goBtn" class="primary">Combine</button>
+      <span id="goNote" class="note" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span> Finished videos</h2>
+    <div id="jobs"></div>
+  </section>
+</main>
+<footer>Everything runs on this computer. Nothing is sent anywhere.</footer>
+<script src="/static/common.js"></script>
+<script src="/static/combine.js"></script>
+</body>
+</html>

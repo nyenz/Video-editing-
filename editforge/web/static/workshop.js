@@ -277,7 +277,8 @@ async function refreshJobs() {
     if (j.status === "done" && j.file_id) {
       act(state.openJobs.has(j.id) ? "Hide" : "Watch", "primary", () => { if (state.openJobs.has(j.id)) state.openJobs.delete(j.id); else state.openJobs.add(j.id); refreshJobs(); });
       acts.append(el("a", { class: "button", href: "/download/" + j.id + "?t=" + encodeURIComponent(TOKEN), text: "Save to my computer" }));
-      act("Edit this video", "secondary", async () => { await loadFiles(j.file_id); openFile(j.file_id); });
+      act("Slice and edit this", "secondary", () => toEditor(j.file_id));
+      act("Cut clips from this", "secondary", async () => { await loadFiles(j.file_id); openFile(j.file_id); });
     }
     if (["done", "failed", "cancelled", "interrupted"].includes(j.status)) act("Remove", "secondary", async () => {
       if (!window.confirm("Remove '" + name + "'? The video file will be deleted.")) return;
@@ -289,7 +290,16 @@ async function refreshJobs() {
   }
 }
 
+/** Make a project from a video and open it in the Editor (cut into 2-second pieces to start with). */
+async function toEditor(fileId) {
+  try {
+    const r = await api("/api/projects", { method: "POST", json: { source: fileId, interval: 2 } });
+    window.location.href = "/edit?p=" + r.project.id;
+  } catch (e) { note("uploadStatus", errText(e)); }
+}
+
 // ---------------------------------------------------------------- wiring
+$("toEditor").addEventListener("click", () => { if (state.file) toEditor(state.file); });
 $("file").addEventListener("change", (e) => { if (e.target.files[0]) upload(e.target.files[0]); e.target.value = ""; });
 const drop = $("drop");
 for (const ev of ["dragenter", "dragover"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
@@ -341,7 +351,9 @@ document.addEventListener("keydown", (e) => {
   try {
     const st = await api("/api/state");
     note("mediaNote", "Copy the video into this folder on your computer, then reload this page and pick it from the list above: " + st.media_dir);
-    await loadFiles();
+    const want = new URLSearchParams(window.location.search).get("open");
+    await loadFiles(want || undefined);
+    if (want && $("fileList").value === want) openFile(want);
   } catch (e) { note("uploadStatus", errText(e)); }
   renderClips(); renderMarks();
   await refreshJobs(); setInterval(refreshJobs, 1000);

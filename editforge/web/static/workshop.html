@@ -14,7 +14,9 @@
   <span class="sub">free video editing on your own computer &middot; version {{VERSION}}</span>
   <nav class="tabs">
     <a class="tab on" href="/">Clip workshop</a>
-    <a class="tab" href="/advanced">Advanced (type a script)</a>
+    <a class="tab" href="/edit">Editor</a>
+    <a class="tab" href="/combine">Combine</a>
+    <a class="tab" href="/advanced">Advanced</a>
   </nav>
 </header>
 <main>
@@ -31,7 +33,8 @@
 
   <section id="step2" class="card" hidden>
     <h2><span class="num">2</span> Find the part you want</h2>
-    <div id="fileFacts" class="note"></div>
+    <div class="row spread"><span id="fileFacts" class="note"></span>
+      <button id="toEditor" class="secondary small" title="Cut this whole video into equal pieces and edit them">Slice and edit this whole video</button></div>
     <div id="previewBox" class="previewBox" hidden>
       <span id="previewText"></span>
       <progress id="previewBar" max="100" value="0"></progress>

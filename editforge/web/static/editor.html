@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ef-token" content="{{TOKEN}}">
+<title>EditForge - Editor</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/workshop.css">
+<link rel="stylesheet" href="/static/editor.css">
+</head>
+<body>
+<header>
+  <h1>EditForge</h1>
+  <span class="sub">free video editing on your own computer &middot; version {{VERSION}}</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Clip workshop</a>
+    <a class="tab on" href="/edit">Editor</a>
+    <a class="tab" href="/combine">Combine</a>
+    <a class="tab" href="/advanced">Advanced</a>
+  </nav>
+</header>
+<main class="widepage">
+  <!-- shown when no project is open -->
+  <section id="home" class="card" hidden>
+    <h2>Start a project</h2>
+    <p class="note">A project is one video cut into pieces. You pick pieces (one by one, in groups, or by a pattern) and choose what happens to them.</p>
+    <div class="row">
+      <label>Video: <select id="newSource"></select></label>
+      <label class="inline"><input type="checkbox" id="newSliceOn" checked> cut it into pieces of</label>
+      <label><input id="newInterval" type="text" inputmode="decimal" value="2" class="tiny" aria-label="Seconds for each piece"> seconds</label>
+      <button id="newBtn" class="primary">Start</button>
+    </div>
+    <div class="row">
+      <label class="link">Add a video from my computer<input type="file" id="newFile" accept="video/*,.mkv,.mov,.avi,.ts" hidden></label>
+      <progress id="newBar" max="100" value="0" hidden></progress>
+      <span id="newStatus" class="note" aria-live="polite"></span>
+    </div>
+    <h2 class="gap">Your projects</h2>
+    <div id="projects"></div>
+  </section>
+
+  <!-- shown when a project is open -->
+  <div id="work" hidden>
+    <section class="card">
+      <div class="row spread">
+        <label class="grow">Project name <input id="projName" type="text" maxlength="80"></label>
+        <span id="saveState" class="note" aria-live="polite"></span>
+        <button id="undoBtn" title="Undo the last change (Ctrl+Z)">Undo</button>
+        <button id="redoBtn" title="Redo (Ctrl+Y)">Redo</button>
+        <a class="button ghost" href="/edit">All projects</a>
+      </div>
+      <div id="projFacts" class="note"></div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">1</span> Cut the video into pieces</h2>
+      <div class="row">
+        <label>Pieces of <input id="sliceSec" type="text" inputmode="decimal" value="2" class="tiny"> seconds</label>
+        <button id="sliceBtn" class="secondary">Cut into pieces</button>
+        <span class="sep">or</span>
+        <label>Cut on every <input id="sliceBeats" type="text" inputmode="numeric" value="4" class="tiny"> beats of the music</label>
+        <button id="beatBtn" class="secondary">Cut on the beat</button>
+      </div>
+      <div id="sliceNote" class="note" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">2</span> Pick pieces</h2>
+      <div id="pvBox" class="previewBox" hidden><span id="pvText"></span> <progress id="pvBar" max="100" value="0"></progress></div>
+      <div class="stage small"><video id="player" controls playsinline preload="metadata"></video></div>
+      <div class="row">
+        <button id="playPicked" class="secondary">Play picked pieces</button>
+        <button id="playAll" class="secondary">Play all kept pieces</button>
+        <span class="note">This quick play shows cuts, order and speed only. Use "Quick preview" in step 5 to see every edit.</span>
+      </div>
+      <div class="row toolbar">
+        <b>Pick:</b>
+        <button id="selAll" class="small">All</button>
+        <button id="selNone" class="small">None</button>
+        <button id="selInvert" class="small">The others</button>
+        <span class="sep">|</span>
+        <label>In every group of <input id="patGroup" type="text" inputmode="numeric" value="3" class="tiny"></label>
+        <span>pick number</span>
+        <span id="patPicks" class="picks"></span>
+        <button id="patBtn" class="primary small">Pick by pattern</button>
+        <label class="inline"><input type="checkbox" id="patAdd"> add to what is picked</label>
+      </div>
+      <div class="row toolbar">
+        <b>Saved patterns:</b>
+        <select id="recipes"></select>
+        <button id="recipeUse" class="small">Use</button>
+        <button id="recipeSave" class="small" title="Save the pattern above together with the edits of the first picked piece">Save this pattern</button>
+        <button id="recipeDel" class="small">Delete</button>
+        <span id="recipeNote" class="note" aria-live="polite"></span>
+      </div>
+      <div id="pickNote" class="note" aria-live="polite"></div>
+      <div id="grid" class="grid" aria-label="Pieces"></div>
+      <div class="note">Click a piece to pick it. Hold Shift and click to pick everything in between. Double-click to play it.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">3</span> Change the picked pieces</h2>
+      <div id="noPick" class="empty">Pick one or more pieces in step 2 first.</div>
+      <div id="tools">
+        <div class="tool"><b>Keep or remove</b>
+          <button data-act="remove">Remove</button><button data-act="restore">Put back</button></div>
+        <div class="tool"><b>Look</b>
+          <button data-fx="hflip">Flip left-right</button><button data-fx="mirror">Mirror halves</button><button data-fx="vflip">Upside down</button>
+          <button data-fx="grayscale">Black and white</button><button data-fx="invert">Invert colours</button><button data-fx="sepia">Sepia</button>
+          <button data-fx="blur">Blur</button><button data-fx="sharpen">Sharpen</button><button data-fx="vignette">Dark corners</button></div>
+        <div class="tool"><b>Speed</b>
+          <select id="speedSel"><option value="0.25">Very slow (0.25x)</option><option value="0.5">Slow (0.5x)</option><option value="0.75">0.75x</option><option value="1" selected>Normal (1x)</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">Fast (2x)</option><option value="3">3x</option><option value="4">Very fast (4x)</option></select>
+          <button data-act="speed">Set speed</button><button data-act="reverse">Play backwards (on/off)</button></div>
+        <div class="tool"><b>Zoom</b>
+          <select id="zoomMode"><option value="in">Zoom in slowly</option><option value="out">Zoom out slowly</option><option value="hold">Stay zoomed in</option><option value="none">No zoom</option></select>
+          <select id="zoomAmt"><option value="1.15">a little</option><option value="1.3" selected>medium</option><option value="1.6">a lot</option><option value="2">double</option></select>
+          <button data-act="zoom">Set zoom</button></div>
+        <div class="tool"><b>Colour</b>
+          <label>Brightness <input id="cBright" type="range" min="-0.5" max="0.5" step="0.05" value="0"></label>
+          <label>Contrast <input id="cContrast" type="range" min="0.5" max="2" step="0.05" value="1"></label>
+          <label>Colour strength <input id="cSat" type="range" min="0" max="2" step="0.05" value="1"></label>
+          <button data-act="color">Set colour</button></div>
+        <div class="tool"><b>Sound</b>
+          <button data-act="mute">Mute (on/off)</button>
+          <select id="volSel"><option value="0.5">Quieter (50%)</option><option value="1" selected>Normal</option><option value="1.5">Louder (150%)</option><option value="2">Much louder (200%)</option></select>
+          <button data-act="volume">Set loudness</button></div>
+        <div class="tool"><b>Length</b>
+          <label>by <input id="growSec" type="text" inputmode="decimal" value="1" class="tiny"> seconds:</label>
+          <button data-grow="start-">Start earlier</button><button data-grow="start+">Start later</button>
+          <button data-grow="end-">End earlier</button><button data-grow="end+">End later</button></div>
+        <div class="tool"><b>Order</b>
+          <button data-act="left">Move earlier</button><button data-act="right">Move later</button><button data-act="copy">Make a copy</button></div>
+        <div class="tool"><b>Start again</b>
+          <button data-act="reset">Clear the edits of these pieces</button></div>
+      </div>
+      <div id="toolNote" class="note" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">4</span> The whole video</h2>
+      <div class="settings">
+        <label>Shape
+          <select id="sShape">
+            <option value="original">Same as the original</option>
+            <option value="vertical">Tall 9:16 (TikTok, Shorts) - middle of the picture</option>
+            <option value="vertical_follow">Tall 9:16 - follow faces</option>
+            <option value="vertical_blur">Tall 9:16 - whole picture, blurred edges</option>
+            <option value="square">Square - middle of the picture</option>
+            <option value="square_follow">Square - follow faces</option>
+            <option value="square_blur">Square - whole picture, blurred edges</option>
+          </select></label>
+        <label>Between pieces
+          <select id="sTrans">
+            <option value="none">Straight cut</option><option value="fade">Crossfade</option><option value="fadeblack">Dip to black</option>
+            <option value="fadewhite">Dip to white</option><option value="slideleft">Slide</option><option value="wipeleft">Wipe</option>
+            <option value="circleopen">Circle</option><option value="pixelize">Pixels</option><option value="zoomin">Zoom</option>
+          </select></label>
+        <label>for <select id="sTransS"><option value="0.2">0.2 s</option><option value="0.3" selected>0.3 s</option><option value="0.5">0.5 s</option><option value="1">1 s</option></select></label>
+        <label>Quality
+          <select id="sQuality"><option value="best">Best (bigger file, slower)</option><option value="high">High</option><option value="small">Smaller file</option></select></label>
+      </div>
+      <div class="settings">
+        <label>Music <select id="sMusic"></select></label>
+        <label class="link">Add a music file<input type="file" id="musicFile" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg" hidden></label>
+        <progress id="musicBar" max="100" value="0" hidden></progress>
+        <label>Music loudness <select id="sMusicVol"><option value="0.1">Very quiet</option><option value="0.25">Quiet (background)</option><option value="0.5">Medium</option><option value="1">Full</option></select></label>
+        <label class="inline"><input type="checkbox" id="sDuck"> Music gets quieter when someone talks</label>
+        <span id="musicStatus" class="note" aria-live="polite"></span>
+      </div>
+      <div class="settings">
+        <label class="inline"><input type="checkbox" id="sOrig"> Keep the video's own sound</label>
+        <label class="inline"><input type="checkbox" id="sLoud"> Make the loudness even</label>
+        <label>Fade in <select id="sFadeIn"><option value="0">none</option><option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2">2 s</option></select></label>
+        <label>Fade out <select id="sFadeOut"><option value="0">none</option><option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2">2 s</option></select></label>
+      </div>
+      <div id="featNote" class="note"></div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">5</span> Make the video</h2>
+      <div id="totals" class="totals"></div>
+      <div class="row">
+        <button id="previewBtn" class="secondary">Quick preview (small, fast)</button>
+        <button id="makeBtn" class="primary">Make the video</button>
+        <span id="makeNote" class="note" aria-live="polite"></span>
+      </div>
+      <div id="jobs"></div>
+    </section>
+  </div>
+</main>
+<footer>Everything runs on this computer. Nothing is sent anywhere.</footer>
+<script src="/static/common.js"></script>
+<script src="/static/editor.js"></script>
+</body>
+</html>

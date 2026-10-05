@@ -23,6 +23,19 @@ The page that opens is the **Clip workshop**:
 Use Google Chrome or Microsoft Edge. If a video will not play, EditForge makes a light copy for watching; your clips are still cut from the original, so quality is not lost.
 For a very big video, copy it into the EditForge media folder (the page shows where) instead of dropping it on the page.
 
+## The Editor: pieces, patterns and edits
+Click **Editor** at the top (or press **Slice and edit this** on any video).
+1. **Cut the video into pieces.** Type the seconds for each piece (for example 2) and press **Cut into pieces**. If you chose music in step 4, **Cut on the beat** cuts on every 4th beat instead.
+2. **Pick pieces.** Click a piece to pick it. Shift-click picks everything in between. For a pattern, set "In every group of 3", tick the numbers you want (1, 2, 3) and press **Pick by pattern**.
+3. **Change the picked pieces.** Remove, flip, mirror, speed, backwards, zoom, colour, sound, make longer or shorter, move, copy. You can mix patterns and hand edits in any order. **Undo** takes back the last change.
+4. **The whole video.** Shape (for example tall 9:16 for TikTok), what happens between pieces, music, fades and quality.
+5. **Make the video.** **Quick preview** makes a small fast version to check. **Make the video** makes the full-quality one.
+
+**Save this pattern** keeps the pattern together with the edits of the first picked piece. **Use** applies it to any project.
+
+## Combine two videos
+Click **Combine** at the top. Choose two videos and how to put them together: one after the other, side by side, top and bottom, a small one in a corner, or one over the other.
+
 ## Your first scripted edit
 Click **Advanced (type a script)** at the top. Drop a video in step 1, pick an example in step 2 (or type), press **Show the plan**, then **Make the video**. Download it when the bar reaches 100%.
 

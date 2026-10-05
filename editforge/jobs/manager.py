@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 import time
@@ -14,6 +15,20 @@ from ..core.cache import home_dir
 from ..core.errors import Cancelled, EditForgeError
 from ..render.engine import Progress, RenderOptions, render
 from .store import FINAL_STATES, JobStore
+
+
+def default_memory_mb() -> float:
+    """Memory the page lets one job use: a quarter of the RAM that is free, between 300 MB and 4 GB.
+
+    The command line keeps its fixed 300 MB default; in the page nobody types a number, so a
+    computer with plenty of memory would otherwise render much slower than it can.
+    """
+    try:
+        import psutil
+        free_mb = psutil.virtual_memory().available / (1024 * 1024)
+    except Exception:
+        return 300.0
+    return float(max(300, min(4000, int(free_mb * 0.25))))
 
 
 class JobManager:
@@ -109,12 +124,22 @@ class JobManager:
             self.store.update(job_id, progress=p.fraction, phase=p.phase, message=p.message, eta=p.eta_seconds)
 
         try:
-            script = read_script(job["script"])
-            plan = prepare(script, input_path=job["input_path"], output_path=job["output_path"] or None, preset=opts.get("preset"),
-                           size=opts.get("size"), fps=opts.get("fps"), quality=opts.get("quality"), fast_cuts=opts.get("fast_cuts"),
-                           preview=bool(opts.get("preview")), base_dir=self.base_dir, allowed_roots=self.allowed_roots,
-                           transcript=opts.get("transcript"), cancel=cancel,
-                           log=lambda t: self.store.update(job_id, message=t))
+            if opts.get("kind") == "combine":
+                self._run_combine(job_id, job, opts, cancel)
+                return
+            if opts.get("kind") == "project":
+                from ..project import plan_project
+                self.store.update(job_id, message="Reading your project")
+                plan = plan_project(json.loads(job["script"]), job["input_path"], music_path=opts.get("music_path"),
+                                    preview=bool(opts.get("preview")), output_path=job["output_path"] or None, cancel=cancel,
+                                    log=lambda t: self.store.update(job_id, message=t))
+            else:
+                script = read_script(job["script"])
+                plan = prepare(script, input_path=job["input_path"], output_path=job["output_path"] or None, preset=opts.get("preset"),
+                               size=opts.get("size"), fps=opts.get("fps"), quality=opts.get("quality"), fast_cuts=opts.get("fast_cuts"),
+                               preview=bool(opts.get("preview")), base_dir=self.base_dir, allowed_roots=self.allowed_roots,
+                               transcript=opts.get("transcript"), cancel=cancel,
+                               log=lambda t: self.store.update(job_id, message=t))
             if not job["output_path"]:
                 out_dir = Path(opts.get("output_dir") or (home_dir() / "outputs")) / job_id
                 out_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +150,7 @@ class JobManager:
             self.store.update(job_id, plan={"duration": plan.timeline.duration, "segments": len(plan.timeline.segments),
                                             "summary": plan.summary(), "warnings": plan.warnings})
             ropts = RenderOptions(overwrite=True, encoder=opts.get("encoder", "auto"), workers=opts.get("workers"),
-                                  max_memory_mb=float(opts.get("max_memory_mb", 300)), resume=True, cancel=cancel,
+                                  max_memory_mb=float(opts.get("max_memory_mb") or default_memory_mb()), resume=True, cancel=cancel,
                                   on_progress=on_progress, log=lambda t: self.store.update(job_id, message=t))
             result = render(plan, ropts)
             self.store.update(job_id, status="done", progress=1.0, phase="done", message="Finished", eta=0.0, result=result.to_dict(),
@@ -138,3 +163,23 @@ class JobManager:
         finally:
             with self._lock:
                 self._cancels.pop(job_id, None)
+
+    def _run_combine(self, job_id: str, job: Dict[str, Any], opts: Dict[str, Any], cancel: threading.Event) -> None:
+        """A job that joins two videos (see :mod:`editforge.combine`). The exceptions are handled by ``_run``."""
+        from ..combine import combine
+        out_dir = Path(opts.get("output_dir") or (home_dir() / "outputs")) / job_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = str(out_dir / (str(opts.get("output_name") or "combined") + ".mp4"))
+        self.store.update(job_id, output_path=out_path, message="Combining the two videos")
+        last = [0.0]
+
+        def on_progress(fraction: float) -> None:
+            now = time.time()
+            if now - last[0] >= 0.25:
+                last[0] = now
+                self.store.update(job_id, progress=fraction, phase="combine", message="Combining the two videos")
+
+        result = combine(job["input_path"], str(opts["second_path"]), out_path, json.loads(job["script"]), cancel=cancel,
+                         on_progress=on_progress)
+        self.store.update(job_id, status="done", progress=1.0, phase="done", message="Finished", eta=0.0, result=result,
+                          output_path=out_path)

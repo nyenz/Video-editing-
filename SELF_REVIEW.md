@@ -1,5 +1,24 @@
 # Self review (honest)
 
+## Version 1.2.0 (Editor and Combine) - what was and was not checked
+* One pass on Linux, FFmpeg 6.1.1, Python 3.13, 2 CPUs: **659 passed, 5 failed, 4 skipped**. The 5 failures are the same old ones
+  listed under 1.1.0 below (three beat/bar tests; two tests that only pass on a 1-CPU machine).
+* The Editor and Combine pages were driven end to end in a real Chromium browser (with a WebM video): new project, cut into pieces,
+  pattern picks, every kind of edit button, Shift-click range, move, copy, undo/redo, Delete key, saved pattern save and use, music upload,
+  cut on the beat, quick preview, full render, reload (everything kept), combine in a corner, and the buttons that jump between pages.
+* Output was checked by reading pixels and sound levels: removed, moved, repeated, stretched, flipped, black-and-white, backwards, muted,
+  music, transitions, every shape, and every combine layout.
+* "Follow faces" was run once on a test video with a real face photo sliding across the frame (OpenCV 4.14). The crop followed it after
+  the fix in this version. It was **not** tried on real footage, several faces, or turned faces. It only works with the tall and square
+  shapes; there is no "zoom in and follow" in the original shape yet.
+* **Not checked:** H.264/MP4 playback in the page (the test browser cannot play it), Windows and Mac, very long videos in the Editor.
+  A project can have at most 5,000 pieces; the grid was only tried with up to 60.
+* The quick play in step 2 of the Editor shows cuts, order and speed only, not looks or backwards. Use Quick preview for those.
+* Transitions make the video a little shorter at every cut, so with "Cut on the beat" they drift off the beat (the page says so).
+  Next to a backwards piece a transition can be shorter than asked, more so at large picture sizes.
+* Combine renders in one FFmpeg run (not the low-memory piece renderer). It was only tried with short clips.
+* Cut on the beat uses the beat detector, which fails three of its own tests on unusual tempos. It was right on a 120 BPM click track.
+
 ## Version 1.1.0 (Clip workshop) - what was and was not checked
 * Ran in one pass on Linux, FFmpeg 6.1.1, Python 3.13, 2 CPUs: **606 passed, 5 failed, 4 skipped**. The 5 failures are the same ones
   as in 1.0.0: three beat/bar tests, and two tests (resume after cancel, memory "+40 MB") that only pass on a 1-CPU machine.
