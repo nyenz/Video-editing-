@@ -110,13 +110,19 @@ class Analyzer:
         data = self._cached("transcript", params, compute, "Writing down the speech with Whisper")
         return [Word(t, float(a), float(b)) for t, a, b in data["words"]], str(data.get("language", ""))
 
-    def faces(self, start: float, end: float):
-        """Face detections between two times (cached). Needs the optional OpenCV add-on."""
+    def faces(self, start: float, end: float, width: int = 320):
+        """Face detections between two times (cached). Needs the optional OpenCV add-on.
+
+        ``width`` is the size of the small copy that is searched. 320 is quick and finds faces that fill a
+        good part of the picture; 640 is about four times slower and also finds small faces in wide shots.
+        """
         from .facepath import Face, detect_faces
         params = {"a": round(start, 1), "b": round(end, 1), "fps": 4.0}
+        if width != 320:
+            params["w"] = width
 
         def compute() -> Any:
-            res = detect_faces(self.media.path, start, end, self.media.width, self.media.height, 4.0, 320, self.cancel)
+            res = detect_faces(self.media.path, start, end, self.media.width, self.media.height, 4.0, width, self.cancel)
             return [[t, [[f.x, f.y, f.w, f.h, f.mouth] for f in faces]] for t, faces in res]
 
         data = self._cached("faces", params, compute, "Looking for faces")

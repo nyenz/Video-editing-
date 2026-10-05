@@ -1,5 +1,24 @@
 # Self review (honest)
 
+## Version 1.3.0 (follow, words, captions) - what was and was not checked
+* One pass on Linux, FFmpeg 6.1.1, Python 3.13, 2 CPUs, with OpenCV 4.14 installed: **699 passed, 0 failed, 1 skipped**
+  (the skipped test is one that only runs when faster-whisper is NOT installed).
+* Follow a thing: checked on generated videos where the true position is known (a patterned box on a curved path, and a photo
+  over a busy moving background). The path was within a few percent and the finished video kept the object in the middle.
+  **Not tried on real footage.** It is plain template matching, so expect it to lose fast, turning or covered objects.
+* Follow the face: checked with two real face photos sliding across the frame, one of them small in a wide picture.
+  **Not tried on real footage, several faces, or turned faces.** With several faces it follows the one seen most often.
+* Words on the picture and captions from a subtitle file: checked by reading pixels of the finished video.
+  **Automatic captions (Whisper) were not run at all**: the model cannot be downloaded in the build sandbox.
+* Long video: a 20-minute source was cut into 600 pieces in the Editor (pattern actions took under 0.1 s) and into 4,800 pieces
+  (about 0.5 s per action), and a 13-minute result made from 400 pieces rendered in about 3.5 minutes at 640x360.
+  A 4-hour source was still not tried.
+* Beat detector: 46 of 48 generated tracks right. The two misses are 72 BPM with off-beat hi-hats, reported at double tempo.
+  Generated drum tracks are much easier than real music, so expect more mistakes on real songs.
+* **Still not checked:** H.264/MP4 playback in the page (the test browser cannot play it), Windows and Mac, real movie footage.
+* Drawing the follow box was driven by a script in Chromium with a WebM video; it was not tried by hand or on a touch screen.
+* "Follow" on single pieces only works with the original shape. With a tall or square shape it is left out and the job says so.
+
 ## Version 1.2.0 (Editor and Combine) - what was and was not checked
 * One pass on Linux, FFmpeg 6.1.1, Python 3.13, 2 CPUs: **659 passed, 5 failed, 4 skipped**. The 5 failures are the same old ones
   listed under 1.1.0 below (three beat/bar tests; two tests that only pass on a 1-CPU machine).

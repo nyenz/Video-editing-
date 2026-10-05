@@ -71,7 +71,7 @@ def test_tempo_estimator_on_a_plain_pulse_train():
 
 @pytest.mark.parametrize("m", [2, 3, 4, 5, 6, 7])
 def test_metre_finder_on_ideal_accents(m):
-    acc = [(1.0 if i % m == 2 else 0.35) for i in range(m * 12)]        # accent on the third beat: the phase is found too
+    acc = [(1.0 if i % m == 2 % m else 0.35) for i in range(m * 12)]    # accent on the third beat (the first, when a bar has 2)
     meter, phase, contrast = B.find_meter(acc)
     assert phase == 2 % m or m == 6
     assert meter in (m, m // 2 if m % 2 == 0 else m) or (m == 6 and meter == 3)

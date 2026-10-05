@@ -119,12 +119,17 @@ def onset_curve(env: Dict[str, List[float]]) -> List[float]:
     out = [0.0] * n
     for tag, w in weights.items():
         e = env[tag]
+        # A rise in decibels alone makes a quiet hi-hat coming out of silence look as strong as a kick drum,
+        # so the tracker used to lock onto the off-beats. Each rise is therefore scaled by how loud the new
+        # sound is compared with the loud moments of its band (square-root of the amplitude ratio).
+        levels = sorted(max(v, -70.0) for v in e[:n])
+        loud = levels[int(0.98 * (len(levels) - 1))] if levels else -70.0
         prev = max(e[0], -70.0)
         for i in range(1, n):
             cur = max(e[i], -70.0)
             d = cur - prev
             if d > 0:
-                out[i] += w * min(d, 30.0)
+                out[i] += w * min(d, 30.0) * min(1.0, 10 ** ((cur - loud) / 40.0))
             prev = cur
     ordered = sorted(out)
     scale = ordered[int(0.95 * (len(ordered) - 1))] if ordered else 0.0
@@ -202,6 +207,63 @@ def track_beats(onset: Sequence[float], period: float, tightness: float = 100.0)
     return beats
 
 
+def refine_tempo(onset: Sequence[float], bpm: float, lo_bpm: float = 55.0, hi_bpm: float = 210.0) -> float:
+    """Fix "wrong multiple" tempo mistakes (half, double, two thirds ...).
+
+    Autocorrelation cannot tell 80 BPM from 160 BPM. So each related tempo is tried for real: beats are
+    placed, and the tempo wins where (a) most beats land on a strong onset and (b) most strong onsets get
+    a beat. Half tempo fails (b), double tempo fails (a), and two-thirds fails both. The first guess is
+    kept unless another tempo is clearly better.
+    """
+    onset = onset[:FPS * 60]          # the first minute is enough to choose between related tempos, and keeps this quick
+    n = len(onset)
+    peaks = [i for i in range(1, n - 1) if onset[i] > 0 and onset[i] >= onset[i - 1] and onset[i] > onset[i + 1]]
+    if len(peaks) < 8 or bpm <= 0:
+        return bpm
+    heights = sorted(onset[i] for i in peaks)
+    threshold = 0.5 * heights[int(0.9 * (len(heights) - 1))]
+    strong = [i for i in peaks if onset[i] >= threshold]
+    if len(strong) < 8:
+        return bpm
+    strong_set = set(strong)
+
+    def score(candidate: float) -> float:
+        frames = track_beats(onset, FPS * 60.0 / candidate)
+        if len(frames) < 4:
+            return 0.0
+        beat_set = set(frames)
+        hit = sum(1 for f in frames if any((f + d) in strong_set for d in range(-3, 4))) / len(frames)
+        cover = sum(1 for p in strong if any((p + d) in beat_set for d in range(-3, 4))) / len(strong)
+        return hit * cover
+
+    best, best_score = bpm, score(bpm)
+    for factor in (2.0, 0.5, 1.5, 2.0 / 3.0, 3.0, 1.0 / 3.0):
+        candidate = bpm * factor
+        if lo_bpm <= candidate <= hi_bpm:
+            sc = score(candidate)
+            if sc > best_score * 1.1 + 0.02:
+                best, best_score = candidate, sc
+    return best
+
+
+def _trim_unsupported(frames: List[int], onset: Sequence[float]) -> List[int]:
+    """Drop beats at the very start and end that have no sound under them.
+
+    The tracker keeps counting into the silence before the music starts and after it stops.
+    Beats inside the music are never removed, even in a quiet passage.
+    """
+    if len(frames) < 4:
+        return frames
+    peaks = sorted(_local_peak(onset, f, 4) for f in frames)
+    floor = 0.15 * peaks[len(peaks) // 2]
+    lo, hi = 0, len(frames)
+    while hi - lo > 1 and _local_peak(onset, frames[hi - 1], 4) < floor:
+        hi -= 1
+    while hi - lo > 1 and _local_peak(onset, frames[lo], 4) < floor:
+        lo += 1
+    return frames[lo:hi]
+
+
 def _local_peak(env_lin: Sequence[float], idx: int, radius: int = 4) -> float:
     lo, hi = max(0, idx - radius), min(len(env_lin), idx + radius + 1)
     return max(env_lin[lo:hi]) if lo < hi else 0.0
@@ -212,9 +274,17 @@ def beat_accents(beat_frames: Sequence[int], env: Dict[str, List[float]], onset:
     lo = [10 ** (max(v, -70.0) / 20.0) for v in env["lo"]]
     mid = [10 ** (max(v, -70.0) / 20.0) for v in env["mid"]]
     out = []
+
+    def energy(env_lin: Sequence[float], f: int) -> float:
+        # Summed over the length of a drum hit, not just its highest 10 ms slice: the peak of a short hit
+        # depends on where it falls between two slices, which made equal beats look unequal in a repeating
+        # pattern (at 140 BPM every 7th beat lines up, so "7 beats per bar" was reported for flat music).
+        a, b = max(0, f - 3), min(len(env_lin), f + 9)
+        return sum(env_lin[a:b]) / 4.0 if a < b else 0.0
+
     for f in beat_frames:
         o = _local_peak(onset, f, 3)
-        out.append(1.0 * _local_peak(lo, f, 4) + 0.5 * _local_peak(mid, f, 4) + 0.02 * o)
+        out.append(1.0 * energy(lo, f) + 0.5 * energy(mid, f) + 0.02 * o)
     return out
 
 
@@ -242,6 +312,8 @@ def find_meter(accents: Sequence[float]) -> Tuple[Optional[int], int, float]:
             off = [a[i] for i in range(n) if (i - p) % m != 0]
             if not on or not off:
                 continue
+            if sum(on) / len(on) < 1.1 * (sum(off) / len(off)):
+                continue        # bar starts must be at least 10% stronger, however regular a tiny difference is
             contrast = (sum(on) / len(on) - sum(off) / len(off)) / std
             # consistency: how often a bar-start beat beats the average of its bar
             wins = 0
@@ -298,9 +370,13 @@ def _analyse_window(path: str, start: float, length: float, cancel: Optional[thr
     env = band_envelopes(path, start, length, cancel)
     onset = onset_curve(env)
     bpm, conf = estimate_tempo(onset)
-    if bpm <= 0:
+    if bpm <= 0 or max(onset, default=0.0) <= 0.0:          # silence has no beat
         return [], 0.0, 0.0, [], {}
+    bpm = refine_tempo(onset, bpm)
     frames = track_beats(onset, FPS * 60.0 / bpm)
+    frames = _trim_unsupported(frames, onset)
+    if len(frames) < 4:                                     # too few to call it a beat
+        return [], 0.0, 0.0, [], {}
     if len(frames) >= 3:
         gaps = sorted(b - a for a, b in zip(frames, frames[1:]))
         median = gaps[len(gaps) // 2]

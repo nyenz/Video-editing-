@@ -83,7 +83,7 @@ async function loadFiles(select) {
   const { files } = await api("/api/files");
   const list = $("fileList");
   list.replaceChildren(el("option", { value: "", text: files.length ? "(choose)" : "(none yet)" }));
-  for (const f of files) list.append(el("option", { value: f.id, text: f.name + "  -  " + fmtSize(f.size) + "  (" + f.where + ")" }));
+  for (const f of files.filter((x) => !x.subtitles)) list.append(el("option", { value: f.id, text: f.name + "  -  " + fmtSize(f.size) + "  (" + f.where + ")" }));
   if (select) list.value = select;
 }
 function upload(file) {
@@ -228,9 +228,15 @@ function renderClips() {
     const edit = el("button", { class: "small", text: "Change", title: "Put this clip back into step 2 to move its start or end" });
     edit.addEventListener("click", () => { state.clips.splice(i, 1); state.start = c.start; state.end = c.end; saveClips(); renderClips(); renderMarks(); seek(c.start); $("step2").scrollIntoView({ behavior: "smooth", block: "start" }); });
     const del = el("button", { class: "small", text: "Delete" }); del.addEventListener("click", () => { state.clips.splice(i, 1); saveClips(); renderClips(); });
+    const move = (dir, text, title) => {
+      const b = el("button", { class: "small", text, title }); b.disabled = i + dir < 0 || i + dir >= state.clips.length;
+      b.addEventListener("click", () => { const j = i + dir; [state.clips[i], state.clips[j]] = [state.clips[j], state.clips[i]]; saveClips(); renderClips(); });
+      return b;
+    };
+    const up = move(-1, "Up", "Move this clip earlier in the joined video"), down = move(1, "Down", "Move this clip later in the joined video");
     box.append(el("div", { class: "clipRow" }, el("span", { class: "n", text: String(i + 1) }), name,
       el("span", { class: "times", text: fmtTime(c.start) + " to " + fmtTime(c.end) + "  (" + fmtTime(c.end - c.start) + ")" }),
-      el("div", { class: "acts" }, play, edit, del)));
+      el("div", { class: "acts" }, play, up, down, edit, del)));
     if (d) { const b = el("div", { class: "clip", title: c.name }); b.style.left = (c.start / d) * 100 + "%"; b.style.width = ((c.end - c.start) / d) * 100 + "%"; bars.append(b); }
   });
   note("clipTotals", state.clips.length ? state.clips.length + " clip" + (state.clips.length === 1 ? "" : "s") + ", " + fmtTime(total, true) + " in total" : "");

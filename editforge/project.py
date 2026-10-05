@@ -20,24 +20,36 @@ from __future__ import annotations
 import math
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from .analysis import follow as follow_mod
 from .analysis.faces import make_face_provider
 from .analysis.manager import Analyzer
+from .analysis.speech import Word, import_transcript
 from .api import Plan, default_output_path
-from .core.errors import EditForgeError, ScriptError
+from .core.errors import EditForgeError, FeatureUnavailable, ScriptError
 from .core.fingerprint import source_identity
 from .core.media import MediaInfo, probe_media
-from .core.model import AudioSpec, CameraSpec, ColorSpec, EffectSpec, JoinSpec, MusicSpec, ReframeSpec, Segment, Timeline
+from .core.model import (AudioSpec, CameraSpec, CaptionSpec, ColorSpec, EffectSpec, JoinSpec, MusicSpec, ReframeSpec, Segment,
+                         TextOverlay, Timeline)
 from .dsl.loader import load_script
 from .dsl.registry import EFFECT_NAMES, XFADE
-from .planner.files import FileResolver
+from .planner.captions import group_lines
+from .planner.files import FileResolver, find_font
 from .planner.planner import Planner
 from .presets.presets import resolve_output
 
 MAX_PIECES = 5000
 MIN_PIECE_SECONDS = 0.04
 ZOOM_MODES = ("none", "in", "out", "hold")
+FOLLOW_MODES = ("none", "face", "object")
+MAX_FOLLOW_POINTS = 600
+MAX_TEXTS = 50
+TEXT_POSITIONS = ("top", "center", "bottom", "top_left", "top_right", "bottom_left", "bottom_right")
+TEXT_SIZES = {"small": 40.0, "medium": 64.0, "large": 96.0, "huge": 140.0}
+TEXT_COLORS = {"white": "#ffffff", "black": "#000000", "yellow": "#ffe600", "red": "#ff3030", "blue": "#3090ff", "green": "#30d060"}
+CAPTION_STYLES = ("karaoke", "plain", "boxed")
+CAPTION_SIZES = {"small": 42.0, "medium": 56.0, "large": 76.0}
 #: shape name -> (output preset, crop aspect or None, follow faces?, fit)
 SHAPES: Dict[str, tuple] = {
     "original": ("original", None, False, None),
@@ -53,6 +65,7 @@ QUALITIES: Dict[str, tuple] = {"best": (17, "medium"), "high": (20, "veryfast"),
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "shape": "original", "transition": "none", "transition_s": 0.3, "music": "", "music_volume": 0.25, "duck": True,
     "original_sound": True, "even_loudness": False, "fade_in": 0.0, "fade_out": 0.0, "quality": "best",
+    "captions": "off", "caption_style": "karaoke", "caption_position": "bottom", "caption_size": "medium",
 }
 
 
@@ -87,6 +100,20 @@ def clean_piece(raw: Any, duration: float) -> Optional[Dict[str, Any]]:
     zoom_raw = raw.get("zoom") if isinstance(raw.get("zoom"), dict) else {}
     mode = zoom_raw.get("mode") if zoom_raw.get("mode") in ZOOM_MODES else "none"
     color_raw = raw.get("color") if isinstance(raw.get("color"), dict) else {}
+    follow_raw = raw.get("follow") if isinstance(raw.get("follow"), dict) else {}
+    follow_mode = follow_raw.get("mode") if follow_raw.get("mode") in FOLLOW_MODES else "none"
+    points: List[List[float]] = []
+    if follow_mode == "object" and isinstance(follow_raw.get("path"), list):
+        for pt in follow_raw["path"][:MAX_FOLLOW_POINTS]:
+            try:
+                t, x, y = float(pt[0]), float(pt[1]), float(pt[2])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if t == t and x == x and y == y and abs(t) < 1e7:
+                points.append([round(t, 3), round(max(0.0, min(1.0, x)), 4), round(max(0.0, min(1.0, y)), 4)])
+        points.sort()
+    if follow_mode == "object" and len(points) < 2:
+        follow_mode = "none"
     return {
         "start": round(start, 4), "end": round(end, 4), "off": bool(raw.get("off")),
         "speed": round(_num(raw.get("speed"), 1.0, 0.1, 16.0), 4), "reverse": bool(raw.get("reverse")),
@@ -95,7 +122,28 @@ def clean_piece(raw: Any, duration: float) -> Optional[Dict[str, Any]]:
         "color": {"brightness": round(_num(color_raw.get("brightness"), 0.0, -1.0, 1.0), 3),
                   "contrast": round(_num(color_raw.get("contrast"), 1.0, 0.0, 3.0), 3),
                   "saturation": round(_num(color_raw.get("saturation"), 1.0, 0.0, 3.0), 3)},
+        "follow": {"mode": follow_mode, "zoom": round(_num(follow_raw.get("zoom"), 1.6, 1.1, 4.0), 3),
+                   "path": points if follow_mode == "object" else []},
     }
+
+
+def clean_texts(raw: Any) -> List[Dict[str, Any]]:
+    """Words to show on the picture. Times are seconds of the FINISHED video; an end of 0 means "until the end"."""
+    out: List[Dict[str, Any]] = []
+    for item in (raw if isinstance(raw, list) else [])[:MAX_TEXTS]:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").replace("\r", "").strip()[:200]
+        if not text:
+            continue
+        start = round(_num(item.get("start"), 0.0, 0.0, 1e6), 3)
+        end = round(_num(item.get("end"), 0.0, 0.0, 1e6), 3)
+        out.append({"text": text, "start": start, "end": end if end > start else 0.0,
+                    "position": item.get("position") if item.get("position") in TEXT_POSITIONS else "bottom",
+                    "size": item.get("size") if item.get("size") in TEXT_SIZES else "medium",
+                    "color": item.get("color") if item.get("color") in TEXT_COLORS else "white",
+                    "box": bool(item.get("box", True))})
+    return out
 
 
 def clean_settings(raw: Any) -> Dict[str, Any]:
@@ -115,6 +163,13 @@ def clean_settings(raw: Any) -> Dict[str, Any]:
     s["fade_out"] = round(_num(raw.get("fade_out"), 0.0, 0.0, 10.0), 3)
     if raw.get("quality") in QUALITIES:
         s["quality"] = raw["quality"]
+    s["captions"] = str(raw.get("captions") or "off")[:300]          # "off", "auto" (listen to the speech) or a subtitle file id
+    if raw.get("caption_style") in CAPTION_STYLES:
+        s["caption_style"] = raw["caption_style"]
+    if raw.get("caption_position") in ("top", "center", "bottom"):
+        s["caption_position"] = raw["caption_position"]
+    if raw.get("caption_size") in CAPTION_SIZES:
+        s["caption_size"] = raw["caption_size"]
     return s
 
 
@@ -127,7 +182,8 @@ def clean_project(raw: Any, duration: float) -> Dict[str, Any]:
         raise EditForgeError(f"A project can have at most {MAX_PIECES:,} pieces.", "Slice into longer pieces, or work on a shorter clip.")
     pieces = [p for p in (clean_piece(x, duration) for x in pieces_raw) if p is not None]
     name = " ".join(str(raw.get("name") or "").split())[:80] or "My project"
-    return {"name": name, "source": str(raw.get("source") or "")[:300], "pieces": pieces, "settings": clean_settings(raw.get("settings"))}
+    return {"name": name, "source": str(raw.get("source") or "")[:300], "pieces": pieces, "settings": clean_settings(raw.get("settings")),
+            "texts": clean_texts(raw.get("texts"))}
 
 
 def slice_pieces(duration: float, interval: float) -> List[Dict[str, Any]]:
@@ -158,7 +214,8 @@ def slice_at(duration: float, times: List[float]) -> List[Dict[str, Any]]:
 class _ProjectPlanner(Planner):
     """Reuses the planner's frame maths, reverse chunking, layout and face tracking for a list of pieces."""
 
-    def piece_segments(self, piece: Dict[str, Any], reframe: Optional[ReframeSpec], silent: bool) -> List[Segment]:
+    def piece_segments(self, piece: Dict[str, Any], reframe: Optional[ReframeSpec], silent: bool,
+                       follow_path: Optional[List[follow_mod.Point]] = None) -> List[Segment]:
         a = max(0, min(self.D_f, self.fr(piece["start"])))
         b = max(0, min(self.D_f, self.fr(piece["end"])))
         if b <= a:
@@ -169,7 +226,14 @@ class _ProjectPlanner(Planner):
         if self.has_video:
             seg.effects = [EffectSpec(name, 0.5) for name in piece["fx"]]
             zoom, amount = piece["zoom"]["mode"], float(piece["zoom"]["amount"])
-            if zoom != "none" and amount > 1.0:
+            if follow_path and reframe is None:
+                # Follow: a zoomed view that glides after the subject. Flips happen before the camera, so they flip the path too.
+                z = float(piece["follow"]["zoom"])
+                fx, fy = "hflip" in piece["fx"], ("vflip" in piece["fx"]) != ("flip" in piece["fx"])
+                pts = [(t, follow_mod.view_position(1.0 - x if fx else x, z), follow_mod.view_position(1.0 - y if fy else y, z))
+                       for t, x, y in follow_mod.window(follow_path, a / self.F - 0.1, b / self.F + 0.1)]
+                seg.camera = CameraSpec(z, z, 0.5, 0.5, 0.5, 0.5, "linear", a / self.F, b / self.F, False, pts)
+            elif zoom != "none" and amount > 1.0:
                 z0, z1 = {"in": (1.0, amount), "out": (amount, 1.0), "hold": (amount, amount)}[zoom]
                 seg.camera = CameraSpec(z0, z1, 0.5, 0.5, 0.5, 0.5, "ease_in_out", a / self.F, b / self.F)
             c = piece["color"]
@@ -199,7 +263,38 @@ class _ProjectPlanner(Planner):
         return True
 
 
-def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional[str] = None, preview: bool = False,
+def remap_words(words: Sequence[Word], segments: Sequence[Segment], fps: float) -> List[tuple]:
+    """Move spoken words from source time to finished-video time, piece by piece, in playing order.
+
+    Unlike the script planner's version this handles pieces that were moved or repeated: a word is shown
+    every time its piece plays. Backwards and muted pieces have no readable speech, so they get no words.
+    """
+    ordered = sorted(words, key=lambda w: w.start)
+    out: List[tuple] = []
+    for seg in segments:
+        if seg.kind != "clip" or seg.reverse or seg.mute:
+            continue
+        s0, s1 = seg.src_start_f / fps, (seg.src_start_f + seg.src_len_f) / fps
+        for w in ordered:
+            if w.start >= s1:
+                break
+            lo, hi = max(w.start, s0), min(w.end, s1)
+            if hi > lo and (hi - lo) >= 0.4 * max(w.end - w.start, 1e-6):
+                o0 = seg.out_start / fps + (lo - s0) / seg.speed
+                o1 = seg.out_start / fps + (hi - s0) / seg.speed
+                out.append((w.text, o0, max(o1, o0 + 0.02)))
+    out.sort(key=lambda x: x[1])
+    fixed: List[tuple] = []
+    for text, a, b in out:                       # words must not overlap in time
+        if fixed and a < fixed[-1][2]:
+            pt, pa, pb = fixed[-1]
+            fixed[-1] = (pt, pa, max(pa + 0.02, min(pb, a)))
+        fixed.append((text, a, max(b, a + 0.02)))
+    return fixed
+
+
+def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional[str] = None, captions_path: Optional[str] = None,
+                 preview: bool = False,
                  output_path: Optional[str] = None, cancel: Optional[threading.Event] = None,
                  log: Optional[Callable[[str], None]] = None) -> Plan:
     """Turn a project into a render :class:`Plan`.
@@ -230,7 +325,27 @@ def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional
     planner = _ProjectPlanner(load_script(""), media, analyzer, out, FileResolver(), face_provider=make_face_provider(analyzer))
     reframe = ReframeSpec(aspect, "face" if follow else "center") if aspect and planner.has_video else None
     silent = not st["original_sound"]
-    groups = [g for g in (planner.piece_segments(p, reframe, silent) for p in live) if g]
+    face_path: List[follow_mod.Point] = []
+    wants_face = [p for p in live if p["follow"]["mode"] == "face"]
+    if wants_face and planner.has_video and reframe is None:
+        if planner.face_provider is None:
+            raise FeatureUnavailable("Following faces is switched off because the free 'opencv-python-headless' add-on is not installed.",
+                                     "Install it with:  pip install 'opencv-python-headless<5'   -- or switch off 'Follow' for those pieces.")
+        face_path = follow_mod.face_points(analyzer.faces(min(p["start"] for p in wants_face), max(p["end"] for p in wants_face), 640))
+        if not face_path:
+            planner.warn("No faces were found, so the pieces set to follow a face are shown without following.")
+    if reframe is not None and any(p["follow"]["mode"] != "none" for p in live):
+        planner.warn("'Follow' on single pieces only works with the original shape, so it was left out. "
+                     "For a tall or square video choose a 'follow faces' shape instead.")
+
+    def path_for(p: Dict[str, Any]) -> Optional[List[follow_mod.Point]]:
+        if p["follow"]["mode"] == "face":
+            return face_path or None
+        if p["follow"]["mode"] == "object":
+            return [tuple(pt) for pt in p["follow"]["path"]]
+        return None
+
+    groups = [g for g in (planner.piece_segments(p, reframe, silent, path_for(p)) for p in live) if g]
     if not groups:
         raise ScriptError("The pieces that are left are empty.", "Put a piece back, or make a piece longer.")
     if st["transition"] != "none" and planner.has_video:
@@ -254,7 +369,34 @@ def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional
         audio.loudnorm = {"target": -14.0, "true_peak": -1.5, "lra": 11.0}
     audio.fade_in, audio.fade_out = float(st["fade_in"]), float(st["fade_out"])
     audio.fade_video = planner.has_video
-    tl = Timeline(planner.segs, out, media.path, planner.D, media.fps, planner.total, [], [], audio, None, "encode",
+    texts: List[TextOverlay] = []
+    if planner.has_video and project.get("texts"):
+        font = find_font(None)
+        for t in project["texts"]:
+            a = min(planner.total, planner.fr(t["start"]))
+            b = planner.total if t["end"] <= 0 else min(planner.total, planner.fr(t["end"]))
+            if b > a:
+                texts.append(TextOverlay(t["text"], a, b, t["position"], None, None, TEXT_SIZES[t["size"]], TEXT_COLORS[t["color"]], font,
+                                         bool(t["box"]), "#000000@0.5", 14.0, 0.0 if t["box"] else 3.0, "#000000", False, 0.0, 0))
+            else:
+                planner.warn(f"The text '{t['text'][:30]}' starts after the video ends, so it is not shown.")
+    captions = None
+    if st["captions"] != "off" and planner.has_video:
+        if captions_path:
+            words, source = import_transcript(captions_path), "subtitle file"
+        elif not media.has_audio:
+            raise ScriptError("Automatic captions need speech, but this video has no sound.", "Switch captions off, or add a subtitle file.")
+        else:
+            words, _ = analyzer.transcript("auto", "base", "auto")
+            source = "speech recognition (Whisper)"
+        lines = group_lines(remap_words(words, planner.segs, planner.F))
+        if not lines:
+            planner.warn("No speech was found in the pieces that are kept, so there are no captions.")
+        else:
+            captions = CaptionSpec("burn", st["caption_style"], CAPTION_SIZES[st["caption_size"]], "#ffffff", "#ffe600", "#000000",
+                                   st["caption_position"], 70.0, None, False, lines, "", source)
+            planner.notes.append(f"Captions: {len(lines)} line(s) from {source}.")
+    tl = Timeline(planner.segs, out, media.path, planner.D, media.fps, planner.total, texts, [], audio, captions, "encode",
                   planner.warnings, planner.notes)
     out_path = output_path or default_output_path(src_path, out.container)
     return Plan(tl, media, planner.script, out_path, list(planner.warnings), notes + list(planner.notes), list(analyzer.notes),

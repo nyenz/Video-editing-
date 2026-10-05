@@ -289,6 +289,24 @@ class ItemBuilder:
             expr += f"+({slope:.4f})*clip(t-({use[i][0]:.4f}),0,{d:.4f})"
         return expr
 
+    @staticmethod
+    def follow_expr(path: Sequence[Tuple[float, float, float]], column: int, tau: str) -> str:
+        """Straight-line glide through (time, x, y) keyframes as an FFmpeg expression of the source time ``tau``.
+
+        Before the first keyframe the value stays at the first one, after the last at the last one.
+        """
+        pts = sorted((float(p[0]), max(0.0, min(1.0, float(p[column])))) for p in path)
+        keep: List[Tuple[float, float]] = []
+        for p in pts:
+            if not keep or p[0] > keep[-1][0] + 1e-4:
+                keep.append(p)
+        expr = f"({keep[0][1]:.5f}"
+        for (t0, v0), (t1, v1) in zip(keep, keep[1:]):
+            d = t1 - t0
+            if abs(v1 - v0) > 1e-6:
+                expr += f"+({(v1 - v0) / d:.6f})*clip({tau}-({t0:.4f}),0,{d:.4f})"
+        return expr + ")"
+
     def _camera(self, g: Graph, cur: str, it: Item, dims: Dims) -> str:
         c = it.seg.camera
         assert c is not None
@@ -298,6 +316,15 @@ class ItemBuilder:
             p = f"clip((on+{it.u0})/{max(1, seg.frames)},0,1)"
             z = f"(1+({c.z0:.4f}-1)*(1-{p})*(1-{p}))"
             fx, fy = "0.5", "0.5"
+        elif c.path:
+            if seg.kind == "freeze":
+                tau = f"({seg.src_start_f / F:.6f})"
+            elif not seg.reverse:
+                tau = f"(({seg.src_start_f}+({seg.speed:.8f})*(on+{it.u0}))/{F:.6f})"
+            else:
+                tau = f"(({seg.src_start_f + seg.src_len_f}-({seg.speed:.8f})*(on+{it.u0}))/{F:.6f})"
+            z = f"{max(1.0, c.z0):.4f}"
+            fx, fy = self.follow_expr(c.path, 1, tau), self.follow_expr(c.path, 2, tau)
         else:
             span = max(c.r1 - c.r0, 1e-6)
             if not seg.reverse:

@@ -56,6 +56,9 @@ class CameraSpec:
     r0: float = 0.0
     r1: float = 1.0
     pulse: bool = False  # a beat pulse: zoom in then relax within the segment
+    # Follow something: (source time, x, y) keyframes; x and y are the view position 0..1 (0 = far left/top,
+    # 1 = far right/bottom) at zoom ``z0``. The view glides in straight lines between keyframes.
+    path: Optional[List[Tuple[float, float, float]]] = None
 
 
 @dataclass

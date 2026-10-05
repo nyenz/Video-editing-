@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0
+* **Follow** (Editor, step 3): zoom in and keep a face in the middle, or draw a box around any thing and the view follows it.
+  Works in the original shape, piece by piece. Faces are now also found when they are small in a wide shot.
+* **Words on the picture** (Editor, step 4): add words with a start and end time, place, size, colour and an optional dark box.
+* **Captions** (Editor, step 4): automatic from the speech (needs the faster-whisper add-on) or from a subtitle file (.srt or .vtt).
+  Captions move with their pieces, also when pieces are moved or repeated.
+* **Clip workshop:** joined clips now come out in the order of the list, with Up and Down buttons.
+* **Quick play** in the Editor now also shows flip, colour looks, zoom and sound (not backwards and not following).
+* **Beat detector:** no longer locks onto quiet off-beat hi-hats, tries half, double and two-thirds tempo for real and keeps the one
+  that fits, drops beats counted into silence, and no longer reports a false bar length for music without accents.
+  On 48 test tracks from 66 to 195 BPM it now gets 46 right (before: 31).
+* Notes from a finished job (for example "no faces were found") are shown under it in the page.
+* All tests pass: the five old failures are gone. Two were the beat detector (fixed), one was a test mistake, and two were tests
+  that assumed a 1-CPU computer.
+* 32 new tests (`tests/test_follow_text.py`).
+
 ## 1.2.0
 New **Editor** page: a video cut into pieces that you pick and change.
 * Cut into pieces of any length (for example 2 seconds), or on every Nth beat of your music.

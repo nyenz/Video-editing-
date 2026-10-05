@@ -37,3 +37,9 @@ a.button.ghost { background:var(--card); color:var(--ink); border:1px solid var(
 .mode span { grid-column:2; color:var(--muted); font-size:14px; } .mode:has(input:checked) { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
 [hidden] { display:none !important; }
 .row.spread { justify-content:space-between; }
+.stage { position:relative; }
+.drawLayer { position:absolute; inset:0; cursor:crosshair; touch-action:none; background:rgba(0,0,0,.15); }
+.drawBox { position:absolute; border:2px solid #ffe600; background:rgba(255,230,0,.15); pointer-events:none; }
+h3 { font-size:16px; margin:16px 0 6px; }
+.textRow { display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; }
+.textRow input.words { flex:1 1 14em; min-width:8em; } .textRow label { display:inline-flex; gap:5px; align-items:center; }

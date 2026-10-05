@@ -7,7 +7,7 @@ function showOptions() {
 }
 async function loadFiles(pickB) {
   const { files } = await api("/api/files");
-  const vids = files.filter((f) => !f.audio);
+  const vids = files.filter((f) => !f.audio && !f.subtitles);
   for (const id of ["fileA", "fileB"]) {
     const sel = $(id), cur = sel.value;
     sel.replaceChildren();

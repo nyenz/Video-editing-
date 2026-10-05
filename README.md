@@ -31,6 +31,11 @@ Click **Editor** at the top (or press **Slice and edit this** on any video).
 4. **The whole video.** Shape (for example tall 9:16 for TikTok), what happens between pieces, music, fades and quality.
 5. **Make the video.** **Quick preview** makes a small fast version to check. **Make the video** makes the full-quality one.
 
+Also in the Editor:
+* **Follow** (step 3). **Follow the face** zooms in and keeps the face in the middle. **Follow a thing** lets you drag a box around anything on the video; the view then follows it through the picked pieces. Both need the free OpenCV add-on (see "Optional add-ons").
+* **Words on the picture** (step 4). Press **+ Add words**, type them, and set from which second to which second they show.
+* **Captions** (step 4). Choose "Automatic" (needs the faster-whisper add-on) or add a subtitle file (.srt).
+
 **Save this pattern** keeps the pattern together with the edits of the first picked piece. **Use** applies it to any project.
 
 ## Combine two videos
@@ -74,12 +79,13 @@ Presets: `original`, `youtube_1080p`, `youtube_4k`, `shorts` (also reels, tiktok
 Exact (default): frame-accurate, the picture is re-encoded. `--fast-cuts`: no re-encoding, very fast, but each cut moves to the nearest keyframe, so the result can start earlier and end later than you asked, and it cannot be combined with picture changes.
 
 ## Optional add-ons (EditForge works without them and says what is switched off)
-`pip install faster-whisper` (automatic captions; downloads a model file once, then works offline) - `pip install "opencv-python-headless<5"` (face-following re-frame). Run `editforge features` to see what is on.
+`pip install faster-whisper` (automatic captions; downloads a model file once, then works offline) - `pip install "opencv-python-headless<5"` (following faces and things, face-following re-frame). Run `editforge features` to see what is on.
 
 ## Real limitations
 * Memory stays flat with the number of cuts and was measured under 300 MB up to 1080p; 4K needs more.
 * Scene detection follows brightness only. Downbeat and active-speaker detection are heuristics and can be wrong.
 * Automatic Whisper captions, hardware encoders, the Windows/Mac launchers and 4-hour sources were not tested by the author (see SELF_REVIEW.md).
+* "Follow a thing" matches the picture inside your box from frame to frame. It loses things that change shape a lot, leave the picture or get covered; the view then waits where it last saw them.
 * Slow motion repeats frames (no smoothing). Zoom can shimmer slightly at slow speeds.
 
 Safety of the web page: it only listens on this computer (127.0.0.1), needs a random per-run key, checks the Host/Origin headers, never inserts your text as HTML, and keeps uploads in their own folder.

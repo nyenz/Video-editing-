@@ -144,7 +144,7 @@ def test_one_video_per_clip_is_frame_exact(web, media):
     assert b > 150 and r < 90
 
 
-def test_join_puts_clips_in_one_video_in_time_order(web, media):
+def test_join_puts_clips_in_one_video_in_list_order(web, media):
     c, _ = web
     fid = c.upload(media["colors"])
     status, data = c.json("POST", "/api/clips", {"input": fid, "join": True, "quality": "high",
@@ -153,7 +153,7 @@ def test_join_puts_clips_in_one_video_in_time_order(web, media):
     job = c.wait_jobs(data["jobs"])[0]
     assert job["status"] == "done" and Path(job["output_path"]).name == "colors_joined.mp4"
     assert count_frames(job["output_path"]) == 50
-    assert color_at(job["output_path"], 0.5)[0] > 150 and color_at(job["output_path"], 1.5)[2] > 150
+    assert color_at(job["output_path"], 0.5)[2] > 150 and color_at(job["output_path"], 1.5)[0] > 150     # blue first, as listed
 
 
 def test_a_finished_clip_can_be_opened_and_cut_again(web, media):

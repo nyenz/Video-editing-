@@ -119,6 +119,7 @@ function startJobList(boxId, onFiles) {
       }
       const v = j.result && j.result.verify;
       if (j.status === "done" && j.result) node.append(el("div", { class: "facts", text: fmtTime(j.result.duration) + " long" + (v && v.width ? " - " + v.width + "x" + v.height : "") + (v && v.size_bytes ? " - " + fmtSize(v.size_bytes) : "") }));
+      if (j.status === "done") for (const w of j.warnings || []) node.append(el("div", { class: "warn", text: "Note: " + w }));
       if (j.error) node.append(el("div", { class: "err", text: j.error + (j.error_fix ? "  How to fix: " + j.error_fix : "") }));
       const acts = el("div", { class: "acts" });
       const act = (text, cls, fn) => { const b = el("button", { text, class: cls || "" }); b.addEventListener("click", fn); acts.append(b); };

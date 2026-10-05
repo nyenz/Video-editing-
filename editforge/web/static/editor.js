@@ -16,7 +16,8 @@ const S = {
 
 // ---------------------------------------------------------------- small helpers
 function blankPiece(start, end) {
-  return { start, end, off: false, speed: 1, reverse: false, mute: false, volume: 1, fx: [], zoom: { mode: "none", amount: 1.3 }, color: { brightness: 0, contrast: 1, saturation: 1 } };
+  return { start, end, off: false, speed: 1, reverse: false, mute: false, volume: 1, fx: [], zoom: { mode: "none", amount: 1.3 }, color: { brightness: 0, contrast: 1, saturation: 1 },
+    follow: { mode: "none", zoom: 1.6, path: [] } };
 }
 function clonePiece(p) { return JSON.parse(JSON.stringify(p)); }
 function num(id, fallback) { const v = parseFloat(String($(id).value).replace(",", ".")); return isFinite(v) ? v : fallback; }
@@ -24,15 +25,15 @@ function pickedList() { return [...S.picked].filter((i) => i < S.proj.pieces.len
 function outLen(p) { return (p.end - p.start) / p.speed; }
 
 // ---------------------------------------------------------------- saving and undo
-function snapshot() { return JSON.stringify({ pieces: S.proj.pieces, settings: S.proj.settings, name: S.proj.name }); }
+function snapshot() { return JSON.stringify({ pieces: S.proj.pieces, settings: S.proj.settings, name: S.proj.name, texts: S.proj.texts }); }
 function remember() { S.undo.push(snapshot()); if (S.undo.length > 60) S.undo.shift(); S.redo = []; }
-function restore(json) { const d = JSON.parse(json); S.proj.pieces = d.pieces; S.proj.settings = d.settings; S.proj.name = d.name; S.picked.clear(); fillSettings(); $("projName").value = S.proj.name; renderAll(); scheduleSave(); }
+function restore(json) { const d = JSON.parse(json); S.proj.pieces = d.pieces; S.proj.settings = d.settings; S.proj.name = d.name; S.proj.texts = d.texts || []; S.picked.clear(); renderTexts(); fillSettings(); $("projName").value = S.proj.name; renderAll(); scheduleSave(); }
 function undo() { if (!S.undo.length) return; S.redo.push(snapshot()); restore(S.undo.pop()); }
 function redo() { if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); }
 function scheduleSave() { note("saveState", "Saving ..."); clearTimeout(S.saveTimer); S.saveTimer = setTimeout(saveNow, 500); }
 function saveNow() {
   clearTimeout(S.saveTimer); S.saveTimer = null;
-  const body = { name: S.proj.name, pieces: S.proj.pieces, settings: S.proj.settings };
+  const body = { name: S.proj.name, pieces: S.proj.pieces, settings: S.proj.settings, texts: S.proj.texts };
   S.saving = S.saving.then(() => api("/api/projects/" + S.id, { method: "PUT", json: body }))
     .then(() => { if (!S.saveTimer) note("saveState", "Saved"); })
     .catch((e) => { note("saveState", "NOT saved: " + errText(e)); });
@@ -50,7 +51,7 @@ async function showHome() {
   $("home").hidden = false;
   const files = await loadFiles();
   const sel = $("newSource"); sel.replaceChildren();
-  const vids = files.filter((f) => !f.audio);
+  const vids = files.filter((f) => !f.audio && !f.subtitles);
   if (!vids.length) sel.append(el("option", { value: "", text: "(add a video first)" }));
   for (const f of vids) sel.append(el("option", { value: f.id, text: f.name + "  -  " + fmtSize(f.size) + "  (" + f.where + ")" }));
   const { projects } = await api("/api/projects");
@@ -81,22 +82,28 @@ async function openProject() {
   try { r = await api("/api/projects/" + S.id); }
   catch (e) { $("home").hidden = false; note("newStatus", errText(e)); S.id = ""; showHome(); return; }
   S.proj = r.project; S.info = r.info;
+  if (!Array.isArray(S.proj.texts)) S.proj.texts = [];
+  for (const p of S.proj.pieces) if (!p.follow) p.follow = { mode: "none", zoom: 1.6, path: [] };
   $("work").hidden = false;
   $("projName").value = S.proj.name;
   note("projFacts", "From " + S.proj.source.split("/").pop() + " - " + fmtTime(S.info.duration, true) + " long" + (S.info.has_video ? ", " + S.info.width + "x" + S.info.height : ", sound only"));
   showVideo(video, S.proj.source, S.info, "pvBox", "pvText", "pvBar");
-  fillMusic(); fillSettings(); renderPicks(); renderRecipes(); renderAll(); note("saveState", "Saved");
+  fillMusic(); fillSettings(); renderPicks(); renderRecipes(); renderTexts(); renderAll(); note("saveState", "Saved");
   startJobList("jobs", async () => { await loadFiles(); fillMusic(); });
   loadFiles().then(fillMusic).catch(() => {});
   api("/api/recipes").then((r) => { S.recipes = r.recipes; renderRecipes(); }).catch(() => {});
   api("/api/state").then((st) => {
-    note("featNote", st.features.faces ? "" : "\"Follow faces\" needs a free add-on that is not installed. Without it, choose \"middle of the picture\".");
+    const missing = [];
+    if (!st.features.faces) missing.push("following faces");
+    if (!st.features.objects) missing.push("following a thing");
+    if (!st.features.captions) missing.push("automatic captions (a subtitle file still works)");
+    note("featNote", missing.length ? "Not available until a free add-on is installed: " + missing.join("; ") + ". See the README file, section \"Optional add-ons\"." : "");
   }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- step 1: cutting into pieces
 function hasEdits() {
-  return S.proj.pieces.some((p) => p.off || p.speed !== 1 || p.reverse || p.mute || p.volume !== 1 || p.fx.length || p.zoom.mode !== "none" || p.color.brightness !== 0 || p.color.contrast !== 1 || p.color.saturation !== 1);
+  return S.proj.pieces.some((p) => p.off || p.speed !== 1 || p.reverse || p.mute || p.volume !== 1 || p.fx.length || p.zoom.mode !== "none" || p.follow.mode !== "none" || p.color.brightness !== 0 || p.color.contrast !== 1 || p.color.saturation !== 1);
 }
 function replacePieces(edges, what) {
   if (S.proj.pieces.length > 1 && hasEdits() && !window.confirm("Cutting again starts over: the edits on the pieces you have now will be lost. (Undo brings them back.) Go on?")) return;
@@ -146,7 +153,8 @@ function tagsOf(p) {
   if (p.speed !== 1) t.push(p.speed + "x");
   if (p.reverse) t.push("backwards");
   for (const f of p.fx) t.push(FX_NAMES[f] || f);
-  if (p.zoom.mode !== "none") t.push("zoom " + p.zoom.mode);
+  if (p.follow.mode === "face") t.push("follows face"); else if (p.follow.mode === "object") t.push("follows thing");
+  else if (p.zoom.mode !== "none") t.push("zoom " + p.zoom.mode);
   if (p.color.brightness !== 0 || p.color.contrast !== 1 || p.color.saturation !== 1) t.push("colour");
   if (p.mute) t.push("muted"); else if (p.volume !== 1) t.push("sound " + Math.round(p.volume * 100) + "%");
   return t.join(", ");
@@ -222,7 +230,10 @@ $("recipeSave").addEventListener("click", async () => {
   if (!name || !name.trim()) return;
   const first = pickedList()[0];
   let look = null;
-  if (first !== undefined) { look = clonePiece(S.proj.pieces[first]); delete look.start; delete look.end; }
+  if (first !== undefined) {
+    look = clonePiece(S.proj.pieces[first]); delete look.start; delete look.end;
+    if (look.follow.mode === "object") look.follow = { mode: "none", zoom: look.follow.zoom, path: [] };   // a drawn box belongs to one moment of one video
+  }
   S.recipes.push({ name: name.trim(), group, picks, look });
   try { await storeRecipes(); note("recipeNote", "Saved '" + name.trim() + "'" + (look ? " with the edits of piece " + (first + 1) + "." : " (pattern only, because no piece was picked).")); }
   catch (e) { S.recipes.pop(); note("recipeNote", errText(e)); }
@@ -253,8 +264,27 @@ function quickPlay(indices) {
   if (!S.queue.length) { note("pickNote", "There is nothing to play: those pieces are removed."); return; }
   S.queuePos = 0; playQueued();
 }
+/** Show a piece's look on the player with CSS, so quick play is close to the real thing (not backwards, not following). */
+function dressPlayer(p) {
+  if (!p) { video.style.transform = ""; video.style.filter = ""; video.controls = true; video.muted = false; video.volume = 1; return; }
+  const sx = p.fx.includes("hflip") ? -1 : 1, sy = p.fx.includes("vflip") ? -1 : 1;
+  const z = p.follow.mode !== "none" ? p.follow.zoom : p.zoom.mode === "none" ? 1 : p.zoom.amount;
+  video.style.transform = "scale(" + sx * z + "," + sy * z + ")";
+  const f = [];
+  if (p.fx.includes("grayscale")) f.push("grayscale(1)");
+  if (p.fx.includes("invert")) f.push("invert(1)");
+  if (p.fx.includes("sepia")) f.push("sepia(1)");
+  if (p.fx.includes("blur")) f.push("blur(3px)");
+  if (p.color.brightness !== 0) f.push("brightness(" + (1 + p.color.brightness) + ")");
+  if (p.color.contrast !== 1) f.push("contrast(" + p.color.contrast + ")");
+  if (p.color.saturation !== 1) f.push("saturate(" + p.color.saturation + ")");
+  video.style.filter = f.join(" ");
+  video.controls = false;                     // the buttons on the video would be flipped and zoomed too
+  video.muted = p.mute || !S.proj.settings.original_sound; video.volume = Math.max(0, Math.min(1, p.volume));
+}
 function playQueued() {
   const p = S.queue[S.queuePos];
+  dressPlayer(p || null);
   if (!p) { S.stopAt = null; video.pause(); video.playbackRate = 1; return; }
   S.stopAt = p.end; video.playbackRate = Math.max(0.25, Math.min(4, p.speed)); video.currentTime = p.start;
   const pr = video.play(); if (pr && pr.catch) pr.catch(() => {});
@@ -263,7 +293,8 @@ function watchPlay() {
   if (S.stopAt !== null && (video.currentTime >= S.stopAt - 0.01 || video.ended)) { S.queuePos++; playQueued(); }
   requestAnimationFrame(watchPlay);
 }
-video.addEventListener("pause", () => { if (S.stopAt !== null && !video.seeking && video.currentTime < S.stopAt - 0.05) { S.stopAt = null; S.queue = []; video.playbackRate = 1; } });
+video.addEventListener("pause", () => { if (S.stopAt !== null && !video.seeking && video.currentTime < S.stopAt - 0.05) { S.stopAt = null; S.queue = []; video.playbackRate = 1; dressPlayer(null); } });
+$("stage").addEventListener("click", (e) => { if (S.stopAt !== null) { e.preventDefault(); S.stopAt = null; S.queue = []; video.pause(); video.playbackRate = 1; dressPlayer(null); } });
 $("playPicked").addEventListener("click", () => { const l = pickedList(); if (!l.length) note("pickNote", "Pick some pieces first."); else quickPlay(l); });
 $("playAll").addEventListener("click", () => quickPlay(S.proj.pieces.map((p, i) => i)));
 
@@ -282,6 +313,8 @@ const ACTIONS = {
   mute: () => { const on = !pickedList().every((i) => S.proj.pieces[i].mute); eachPicked((p) => { p.mute = on; }); },
   volume: () => eachPicked((p) => { p.volume = num("volSel", 1); p.mute = false; }),
   zoom: () => eachPicked((p) => { p.zoom = { mode: $("zoomMode").value, amount: num("zoomAmt", 1.3) }; }),
+  followFace: () => { if (eachPicked((p) => { p.follow = { mode: "face", zoom: num("followZoom", 1.6), path: [] }; })) note("toolNote", "These pieces will zoom in and follow the face. Use Quick preview to check it."); },
+  followOff: () => eachPicked((p) => { p.follow = { mode: "none", zoom: p.follow.zoom, path: [] }; }),
   color: () => eachPicked((p) => { p.color = { brightness: num("cBright", 0), contrast: num("cContrast", 1), saturation: num("cSat", 1) }; }),
   reset: () => eachPicked((p) => { Object.assign(p, blankPiece(p.start, p.end)); }),
   copy: () => {
@@ -331,10 +364,18 @@ function renderTools() {
 }
 
 // ---------------------------------------------------------------- step 4: whole-video settings
-const SETTINGS = [["sShape", "shape"], ["sTrans", "transition"], ["sTransS", "transition_s", true], ["sQuality", "quality"], ["sMusic", "music"],
+const SETTINGS = [["sCap", "captions"], ["sCapStyle", "caption_style"], ["sCapPos", "caption_position"], ["sCapSize", "caption_size"], ["sShape", "shape"], ["sTrans", "transition"], ["sTransS", "transition_s", true], ["sQuality", "quality"], ["sMusic", "music"],
   ["sMusicVol", "music_volume", true], ["sFadeIn", "fade_in", true], ["sFadeOut", "fade_out", true]];
 const CHECKS = [["sDuck", "duck"], ["sOrig", "original_sound"], ["sLoud", "even_loudness"]];
+function fillCaptions() {
+  const sel = $("sCap"), cur = S.proj ? S.proj.settings.captions : "off";
+  sel.replaceChildren(el("option", { value: "off", text: "Off" }), el("option", { value: "auto", text: "Automatic (listen to the speech)" }));
+  for (const f of S.files.filter((x) => x.subtitles)) sel.append(el("option", { value: f.id, text: "From file: " + f.name }));
+  if (![...sel.options].some((o) => o.value === cur)) sel.append(el("option", { value: cur, text: cur.split("/").pop() + " (missing)" }));
+  sel.value = cur;
+}
 function fillMusic() {
+  fillCaptions();
   const sel = $("sMusic"), cur = S.proj ? S.proj.settings.music : "";
   sel.replaceChildren(el("option", { value: "", text: "No music" }));
   for (const f of S.files.filter((x) => x.audio)) sel.append(el("option", { value: f.id, text: f.name }));
@@ -354,6 +395,104 @@ $("musicFile").addEventListener("change", (e) => {
     if (data.has_video) { note("musicStatus", "That is a video, not a music file. Choose an audio file such as an MP3."); return; }
     await loadFiles(); change(() => { S.proj.settings.music = data.id; }); fillMusic();
   });
+});
+
+$("capFile").addEventListener("change", (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (f) uploadFile(f, $("capBar"), "capStatus", async (data) => {
+    if (!data.subtitles) { note("capStatus", "That is not a subtitle file. Choose a .srt or .vtt file."); return; }
+    await loadFiles(); change(() => { S.proj.settings.captions = data.id; }); fillMusic();
+    note("capStatus", "Ready: " + data.name + " (" + data.words + " words)");
+  });
+});
+
+// words on the picture
+function renderTexts() {
+  const box = $("texts"); box.replaceChildren();
+  if (!S.proj.texts.length) box.append(el("div", { class: "empty", text: "No words yet." }));
+  S.proj.texts.forEach((t, i) => {
+    const field = (cls, value, label, apply) => {
+      const inp = el("input", { type: "text", class: cls, value: String(value), "aria-label": label });
+      inp.addEventListener("change", () => change(() => apply(inp.value)));
+      return inp;
+    };
+    const pick = (value, options, label, apply) => {
+      const sel = el("select", { "aria-label": label });
+      for (const [v, name] of options) sel.append(el("option", { value: v, text: name }));
+      sel.value = value; sel.addEventListener("change", () => change(() => apply(sel.value)));
+      return sel;
+    };
+    const secs = (v) => { const n = parseFloat(String(v).replace(",", ".")); return isFinite(n) && n > 0 ? n : 0; };
+    const boxed = el("input", { type: "checkbox" }); boxed.checked = t.box; boxed.addEventListener("change", () => change(() => { t.box = boxed.checked; }));
+    const del = el("button", { class: "small", text: "Delete" }); del.addEventListener("click", () => change(() => { S.proj.texts.splice(i, 1); renderTexts(); }));
+    box.append(el("div", { class: "textRow" },
+      field("words", t.text, "Words", (v) => { if (v.trim()) t.text = v.trim().slice(0, 200); renderTexts(); }),
+      el("label", {}, el("span", { text: "from" }), field("tiny", t.start, "From second", (v) => { t.start = secs(v); renderTexts(); }), el("span", { text: "s" })),
+      el("label", {}, el("span", { text: "to" }), field("tiny", t.end > 0 ? t.end : "", "To second", (v) => { t.end = secs(v); renderTexts(); }), el("span", { text: "s" })),
+      pick(t.position, [["bottom", "Bottom"], ["center", "Middle"], ["top", "Top"], ["top_left", "Top left"], ["top_right", "Top right"], ["bottom_left", "Bottom left"], ["bottom_right", "Bottom right"]], "Place", (v) => { t.position = v; }),
+      pick(t.size, [["small", "Small"], ["medium", "Medium"], ["large", "Large"], ["huge", "Huge"]], "Size", (v) => { t.size = v; }),
+      pick(t.color, [["white", "White"], ["yellow", "Yellow"], ["black", "Black"], ["red", "Red"], ["blue", "Blue"], ["green", "Green"]], "Colour", (v) => { t.color = v; }),
+      el("label", { class: "inline" }, boxed, el("span", { text: "dark box behind" })), del));
+  });
+}
+$("addText").addEventListener("click", () => {
+  if (S.proj.texts.length >= 50) return;
+  change(() => { S.proj.texts.push({ text: "Your words", start: 0, end: 0, position: "bottom", size: "medium", color: "white", box: true }); });
+  renderTexts();
+  const rows = $("texts").querySelectorAll("input.words"); const last = rows[rows.length - 1]; if (last) { last.focus(); last.select(); }
+});
+
+// follow a thing: draw a box on the video, then the app follows it through the picked pieces
+const draw = { on: false, x0: 0, y0: 0, rect: null };
+function pictureRect() {      // where the picture really is inside the <video> box (it is letter-boxed)
+  const r = video.getBoundingClientRect(), vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const k = Math.min(r.width / vw, r.height / vh), w = vw * k, h = vh * k;
+  return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
+}
+function endDraw() { draw.on = false; $("drawLayer").hidden = true; $("drawBox").hidden = true; $("drawHelp").hidden = true; }
+$("followThing").addEventListener("click", () => {
+  const list = pickedList();
+  if (!list.length) { note("toolNote", "Pick one or more pieces in step 2 first."); return; }
+  const lo = Math.min(...list.map((i) => S.proj.pieces[i].start)), hi = Math.max(...list.map((i) => S.proj.pieces[i].end));
+  if (!pictureRect()) { note("toolNote", "The video is not showing here, so a box cannot be drawn. Open this page in Google Chrome or Microsoft Edge."); return; }
+  dressPlayer(null); S.stopAt = null; S.queue = []; video.pause();
+  if (video.currentTime < lo || video.currentTime > hi) video.currentTime = Math.min(hi - 0.05, lo + 0.05);
+  $("drawLayer").hidden = false; $("drawHelp").hidden = false;
+  $("stage").scrollIntoView({ behavior: "smooth", block: "center" });
+  note("toolNote", "Now drag a box around the thing on the video above. (To use another moment: Cancel, pause the video where you can see the thing clearly, and press the button again.)");
+});
+$("drawCancel").addEventListener("click", () => { endDraw(); note("toolNote", ""); });
+const layer = $("drawLayer");
+layer.addEventListener("pointerdown", (e) => { layer.setPointerCapture(e.pointerId); draw.on = true; draw.x0 = e.clientX; draw.y0 = e.clientY; draw.rect = null; });
+layer.addEventListener("pointermove", (e) => {
+  if (!draw.on) return;
+  const L = layer.getBoundingClientRect(), b = $("drawBox");
+  const x = Math.min(draw.x0, e.clientX), y = Math.min(draw.y0, e.clientY), w = Math.abs(e.clientX - draw.x0), h = Math.abs(e.clientY - draw.y0);
+  draw.rect = { x, y, w, h };
+  b.hidden = false; b.style.left = (x - L.left) + "px"; b.style.top = (y - L.top) + "px"; b.style.width = w + "px"; b.style.height = h + "px";
+});
+layer.addEventListener("pointerup", async () => {
+  if (!draw.on) return;
+  draw.on = false;
+  const pr = pictureRect(), r = draw.rect, list = pickedList();
+  endDraw();
+  if (!pr || !r || r.w < 8 || r.h < 8) { note("toolNote", "That box was too small. Press the button and drag a bigger box."); return; }
+  const box = { x: (r.x - pr.left) / pr.width, y: (r.y - pr.top) / pr.height, w: r.w / pr.width, h: r.h / pr.height };
+  box.x = Math.max(0, box.x); box.y = Math.max(0, box.y); box.w = Math.min(1 - box.x, box.w); box.h = Math.min(1 - box.y, box.h);
+  if (!(box.w > 0.01 && box.h > 0.01)) { note("toolNote", "The box was outside the picture. Try again."); return; }
+  const lo = Math.min(...list.map((i) => S.proj.pieces[i].start)), hi = Math.max(...list.map((i) => S.proj.pieces[i].end));
+  note("toolNote", "Following it through the picked pieces ...");
+  try {
+    const res = await api("/api/track", { method: "POST", json: { input: S.proj.source, at: video.currentTime, box, start: lo, end: hi } });
+    const zoom = num("followZoom", 1.6);
+    change(() => list.forEach((i) => {
+      const p = S.proj.pieces[i];
+      p.follow = { mode: "object", zoom, path: res.path.filter((pt) => pt[0] >= p.start - 0.5 && pt[0] <= p.end + 0.5) };
+    }));
+    const pct = Math.round(res.found * 100);
+    note("toolNote", "Done. I could see it " + pct + "% of the time." + (pct < 70 ? " That is low: the view stays still where it was lost. Try a tighter box, or fewer pieces at a time." : " Use Quick preview to check it."));
+  } catch (e) { note("toolNote", errText(e)); }
 });
 
 // ---------------------------------------------------------------- step 5: totals and making

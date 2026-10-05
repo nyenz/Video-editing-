@@ -281,6 +281,9 @@ def detect_faces(path: str, start: float, end: float, src_w: int, src_h: int, sa
     if not hasattr(cv2, "CascadeClassifier"):
         raise FeatureUnavailable("Face tracking does not work with OpenCV 5, which is what is installed.",
                                  "Install the older one with:  pip install \"opencv-python-headless<5\"   -- or use  reframe 9:16 mode=center")
+    # The smallest face looked for: 1/14 of the width for the quick 320 copy, but never more than 24 pixels,
+    # so the finer 640 copy really does find the small faces of a wide shot.
+    min_face = max(18, min(width // 14, 24))
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     w = width - width % 2
     h = max(2, int(round(w * src_h / src_w / 2)) * 2)
@@ -300,7 +303,7 @@ def detect_faces(path: str, start: float, end: float, src_w: int, src_h: int, sa
             if len(buf) < size:
                 break
             gray = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
-            boxes = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(max(18, w // 14), max(18, w // 14)))
+            boxes = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(min_face, min_face))
             faces: List[Face] = []
             for (x, y, bw, bh) in boxes:
                 mouth = 0.0

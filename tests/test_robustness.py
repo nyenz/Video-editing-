@@ -180,7 +180,8 @@ def test_cancel_stops_cleanly_and_resume_finishes(long_video, tmp_path, monkeypa
     assert not os.path.exists(out) and not [f for f in os.listdir(tmp_path) if f.endswith(".part")]
     work = list((tmp_path / "work").iterdir())[0]
     assert not list(work.glob("*.part")) and list(work.glob("*.ts"))
-    res = render(plan, RenderOptions(overwrite=True, workdir_root=str(tmp_path / "work")))
+    # Resume reuses pieces when the settings are the same as before (pieces are named after the worker settings).
+    res = render(plan, RenderOptions(overwrite=True, workdir_root=str(tmp_path / "work"), workers=1, max_memory_mb=300))
     assert res.pieces_reused >= 2 and res.verify.ok and count_frames(out) == plan.timeline.total_frames
 
 
@@ -335,7 +336,10 @@ def test_memory_stays_flat_with_many_cuts(long_video, tmp_path):
         script.write_text("keep " + ", ".join(f"{i * 2.8:.1f}-{i * 2.8 + 1.2:.1f}" for i in range(n)))
         out = str(tmp_path / f"o{n}.mp4")
         env = dict(os.environ, EDITFORGE_HOME=str(tmp_path / f"h{n}"), PYTHONPATH=str(ROOT))
-        proc = subprocess.Popen([sys.executable, "-m", "editforge", "edit", str(script), "-i", long_video, "-o", out, "--no-resume"],
+        # One worker for both runs: on a computer with several CPUs a bigger job is given more workers, which uses
+        # more memory on purpose. This test is about memory growing with the number of cuts.
+        proc = subprocess.Popen([sys.executable, "-m", "editforge", "edit", str(script), "-i", long_video, "-o", out, "--no-resume",
+                                 "--workers", "1"],
                                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         mon = PeakMemoryMonitor(proc.pid, interval=0.03).start()
         assert proc.wait(timeout=600) == 0

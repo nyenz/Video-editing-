@@ -131,6 +131,7 @@ class JobManager:
                 from ..project import plan_project
                 self.store.update(job_id, message="Reading your project")
                 plan = plan_project(json.loads(job["script"]), job["input_path"], music_path=opts.get("music_path"),
+                                    captions_path=opts.get("captions_path"),
                                     preview=bool(opts.get("preview")), output_path=job["output_path"] or None, cancel=cancel,
                                     log=lambda t: self.store.update(job_id, message=t))
             else:

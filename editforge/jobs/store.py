@@ -106,7 +106,8 @@ class JobStore:
         for r in rows:
             d = self._row(r)
             d.pop("script", None)
-            d.pop("plan", None)
+            plan = d.pop("plan", None)          # large; only its warnings are useful in a list
+            d["warnings"] = list(plan.get("warnings") or [])[:6] if isinstance(plan, dict) else []
             out.append(d)
         return out
 

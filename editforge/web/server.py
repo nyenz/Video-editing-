@@ -48,6 +48,8 @@ STATIC_FILES = {"app.js": "application/javascript; charset=utf-8", "style.css": 
                 "combine.js": "application/javascript; charset=utf-8", "common.js": "application/javascript; charset=utf-8"}
 PAGES = {"/": "workshop.html", "/edit": "editor.html", "/combine": "combine.html", "/advanced": "index.html"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"}
+SUBTITLE_EXTS = {".srt", ".vtt"}
+MAX_SUBTITLE_BYTES = 5 * 1024 * 1024
 PROJECT_ID = r"[0-9a-f]{12}"
 MAX_RECIPES = 100
 MAX_CLIPS = 200
@@ -255,11 +257,11 @@ class AppState:
                 for f in d.iterdir():
                     if f.is_file():
                         out.append({"id": f"u/{d.name}/{f.name}", "name": f.name, "size": f.stat().st_size, "where": "uploaded",
-                                    "audio": f.suffix.lower() in AUDIO_EXTS})
+                                    "audio": f.suffix.lower() in AUDIO_EXTS, "subtitles": f.suffix.lower() in SUBTITLE_EXTS})
         for f in sorted(self.media.iterdir()):
             if f.is_file() and not f.name.startswith("."):
                 out.append({"id": f"m/{f.name}", "name": f.name, "size": f.stat().st_size, "where": "media folder",
-                            "audio": f.suffix.lower() in AUDIO_EXTS})
+                            "audio": f.suffix.lower() in AUDIO_EXTS, "subtitles": f.suffix.lower() in SUBTITLE_EXTS})
         return out
 
 
@@ -366,9 +368,11 @@ class Handler(BaseHTTPRequestHandler):
                 if self._guard() is None:
                     return
                 from ..analysis.faces import opencv_available
+                from ..analysis.follow import object_tracking_available
                 from ..analysis.speech import whisper_available
                 self._json({"version": __version__, "presets": [{"name": p.name, "label": p.label, "description": p.description} for p in PRESETS],
-                            "features": {"captions": whisper_available(), "faces": opencv_available()},
+                            "features": {"captions": whisper_available(), "faces": opencv_available(),
+                                         "objects": object_tracking_available()},
                             "media_dir": str(self.state.media)})
             elif path == "/api/files":
                 if self._guard() is None:
@@ -472,6 +476,11 @@ class Handler(BaseHTTPRequestHandler):
                 if data is None:
                     return
                 self._json(self._beats(str(data.get("input", ""))))
+            elif path == "/api/track":
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json(self._track(data))
             elif path == "/api/combine":
                 data = self._read_json()
                 if data is None:
@@ -613,8 +622,22 @@ class Handler(BaseHTTPRequestHandler):
                 music_path = self.state.resolve_input(proj["settings"]["music"])
             except EditForgeError:
                 raise EditForgeError("The music file of this project is gone.", "Choose the music again in the Music box, or choose 'No music'.")
-        project_mod.plan_project(proj, src, music_path=music_path, preview=preview)      # fail early with a clear message
-        opts = {"kind": "project", "preview": preview, "music_path": music_path, "output_dir": str(self.state.outputs),
+        captions_path = None
+        cap = proj["settings"]["captions"]
+        if cap not in ("off", "auto"):
+            try:
+                captions_path = self.state.resolve_input(cap)
+            except EditForgeError:
+                raise EditForgeError("The subtitle file of this project is gone.", "Choose it again in the Captions box, or switch captions off.")
+        if cap == "auto":
+            from ..analysis.speech import whisper_available
+            if not whisper_available():
+                raise EditForgeError("Automatic captions need the free 'faster-whisper' add-on, which is not installed.",
+                                     "Install it with:  pip install faster-whisper   -- or add a subtitle file (.srt) instead.")
+        else:                                                    # fail early with a clear message (speech recognition is too slow to try here)
+            project_mod.plan_project(proj, src, music_path=music_path, captions_path=captions_path, preview=preview)
+        opts = {"kind": "project", "preview": preview, "music_path": music_path, "captions_path": captions_path,
+                "output_dir": str(self.state.outputs),
                 "output_name": project_mod.output_stem(proj, src, preview)}
         return self.state.manager.submit(json.dumps(proj), src, "", opts)
 
@@ -627,6 +650,26 @@ class Handler(BaseHTTPRequestHandler):
             raise EditForgeError("That file has no sound, so there is no beat to find.", "Choose a music file.")
         beats = Analyzer(info).beats()
         return {"tempo": beats.tempo, "beats": beats.beats, "duration": info.duration, "notes": beats.notes}
+
+    def _track(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Follow the thing inside a box the user drew on the video, between two times."""
+        from ..analysis.follow import track_object
+        src = self.state.resolve_input(str(data.get("input", "")))
+        info = probe_media(src)
+        if not info.has_video:
+            raise EditForgeError("This file has no picture to follow anything in.", "Choose a video.")
+        try:
+            at, start, end = float(data["at"]), float(data["start"]), float(data["end"])
+            box = [float(data["box"][k]) for k in ("x", "y", "w", "h")]
+        except (KeyError, TypeError, ValueError):
+            raise EditForgeError("The box or the times are missing.", "Draw the box on the video again.")
+        if any(v != v for v in box + [at, start, end]) or box[2] <= 0 or box[3] <= 0:
+            raise EditForgeError("The box is empty.", "Drag a box around the thing you want to follow.")
+        start, end = max(0.0, start), min(info.duration, end)
+        if end - start < 0.2:
+            raise EditForgeError("The picked pieces are too short to follow anything.", "Pick longer pieces.")
+        points, found = track_object(src, at, box, start, end, info.width, info.height)
+        return {"path": [list(p) for p in points], "found": found}
 
     def _combine(self, data: Dict[str, Any]) -> str:
         if not data.get("a") or not data.get("b"):
@@ -691,9 +734,12 @@ class Handler(BaseHTTPRequestHandler):
         stem = Path(src).stem[:60]
         base = {"quality": quality, "output_dir": str(self.state.outputs), "preview": False, "fast_cuts": None}
         if data.get("join"):
-            clips.sort()
-            script = "keep " + ", ".join(f"{a:.3f}-{b:.3f}" for a, b, _ in clips)
-            return [self.state.manager.submit(script, src, "", dict(base, output_name=f"{stem}_joined"))]
+            # Joined in the order of the list (not time order), so it goes through the project planner.
+            proj = project_mod.clean_project({"name": f"{stem}_joined", "source": "", "settings": {"quality": {"medium": "small"}.get(quality, quality)},
+                                              "pieces": [{"start": a, "end": b} for a, b, _ in clips]}, info.duration)
+            project_mod.plan_project(proj, src)
+            return [self.state.manager.submit(json.dumps(proj), src, "", {"kind": "project", "preview": False, "music_path": None,
+                                                                         "output_dir": str(self.state.outputs), "output_name": f"{stem}_joined"})]
         return [self.state.manager.submit(f"keep {a:.3f}-{b:.3f}", src, "", dict(base, output_name=f"{stem}_{name}"))
                 for a, b, name in clips]
 
@@ -785,6 +831,16 @@ class Handler(BaseHTTPRequestHandler):
                     fh.write(chunk)
                     remaining -= len(chunk)
             os.replace(part, dest)
+            if dest.suffix.lower() in SUBTITLE_EXTS:            # a subtitle file for captions, not a video
+                if length > MAX_SUBTITLE_BYTES:
+                    raise EditForgeError("That subtitle file is too large.", "Subtitle files are small text files (.srt or .vtt).")
+                from ..analysis.speech import import_transcript
+                words = import_transcript(str(dest))
+                if not words:
+                    raise EditForgeError("I could not find any timed lines in that subtitle file.", "Choose a .srt or .vtt file with times.")
+                self._json({"id": f"u/{uid}/{name}", "name": name, "size": dest.stat().st_size, "subtitles": True, "words": len(words),
+                            "has_video": False, "has_audio": False, "duration": 0, "width": 0, "height": 0}, 201)
+                return
             info = probe_media(str(dest))
         except BaseException as exc:
             shutil.rmtree(folder, ignore_errors=True)

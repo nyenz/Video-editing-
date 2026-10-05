@@ -29,3 +29,4 @@ table { width:100%; border-collapse:collapse; font-size:13px; } th, td { text-al
 progress { width:100%; height:12px; } .job .err { color:var(--bad); margin-top:6px; } .job .acts { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 a.button { display:inline-block; padding:7px 14px; border-radius:8px; background:var(--accent); color:#fff; text-decoration:none; }
 footer { text-align:center; color:var(--muted); padding:0 0 30px; font-size:13px; }
+.job .warn { color:var(--warn); font-size:14px; margin-top:4px; }
