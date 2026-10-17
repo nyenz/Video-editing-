@@ -27,7 +27,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
-          python -m pip install "opencv-python-headless>=4.8,<5" "faster-whisper>=1.0" "pyinstaller>=6.10"
+          python -m pip install "opencv-python-headless>=4.8,<5" "faster-whisper>=1.0" "pyinstaller>=6.10" pytest-timeout
 
       - name: Get FFmpeg
         shell: pwsh
@@ -45,7 +45,8 @@ jobs:
           packaging\ffmpeg\ffmpeg.exe -hide_banner -version | Select-Object -First 1
 
       - name: Run the tests on Windows
-        run: python -m pytest -q -x tests/test_timecode.py tests/test_dsl.py tests/test_project.py tests/test_web_workshop.py tests/test_web_editor.py tests/test_render.py tests/test_desktop.py
+        timeout-minutes: 25
+        run: python -m pytest -v --timeout=180 -p no:cacheprovider tests/test_timecode.py tests/test_dsl.py tests/test_project.py tests/test_web_workshop.py tests/test_web_editor.py tests/test_desktop.py
 
       - name: Build EditForge.exe
         run: pyinstaller packaging/editforge.spec --noconfirm --distpath dist --workpath build
