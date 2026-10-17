@@ -48,10 +48,14 @@ jobs:
         timeout-minutes: 25
         shell: pwsh
         run: |
-          python -m pytest -q -rfE --tb=line --timeout=180 -p no:cacheprovider tests/test_timecode.py tests/test_dsl.py tests/test_project.py tests/test_web_workshop.py tests/test_web_editor.py tests/test_desktop.py 2>&1 | Tee-Object -FilePath pytest.txt
+          python -m pytest -v -rfE --tb=line --timeout=180 -p no:cacheprovider tests/test_timecode.py tests/test_dsl.py tests/test_project.py tests/test_web_workshop.py tests/test_web_editor.py tests/test_desktop.py 2>&1 | Tee-Object -FilePath pytest.txt
           $code = $LASTEXITCODE
           # Show failures as annotations, so they can be read without the full log.
           Get-Content pytest.txt | Select-String -Pattern "^(FAILED|ERROR)|Timeout|passed|failed" | Select-Object -Last 9 | ForEach-Object { Write-Output "::error title=test::$($_.Line)" }
+          $lines = Get-Content pytest.txt
+          $t = ($lines | Select-String -Pattern "Timeout" | Select-Object -First 1).LineNumber
+          if ($t) { $lines[[Math]::Max(0, $t - 4)..($t - 2)] | ForEach-Object { Write-Output "::error title=before timeout::$_" }
+                    $lines | Select-String -Pattern 'File ".*(tests|editforge).*", line' | Select-Object -First 8 | ForEach-Object { Write-Output "::warning title=stack::$($_.Line.Trim())" } }
           Get-Content pytest.txt | Select-String -Pattern "^[A-Za-z]:\\.*:\d+: " | Select-Object -First 9 | ForEach-Object { Write-Output "::warning title=where::$($_.Line)" }
           exit $code
 
