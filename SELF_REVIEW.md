@@ -1,5 +1,19 @@
 # Self review (honest)
 
+## Version 1.4.0 (redesign and Windows installer) - what was and was not checked
+* Every page was driven by a script in Chromium at 1366x720 (a WebM test video, because the test browser cannot play H.264):
+  the Editor (pattern remove, play across pieces, click/Shift/box select, edge trim with the live length, drag to reorder, undo,
+  split, effects, words, tall shape, export), the Clips page (drag to mark, add, tick, trim a clip on the timeline, join),
+  Combine (length and size before making) and Advanced (plan).
+* The live viewer switches between two video players at piece boundaries. It was checked for position and length, **not judged by eye
+  for smoothness on real footage**. Backwards, mirror and follow show only in the export (the viewer says so).
+* Films with Dolby AC-3 sound in .mkv: a test makes one, checks that the page calls it "cannot play", and that the light copy has
+  normal stereo AAC sound. Not tried with a real film or in Brave.
+* The desktop launcher was checked on Linux with Chromium: it opens an app window, a second start opens another window instead of a
+  second copy, and closing the window stops it. **On Windows it is checked only by GitHub Actions** (build, self-test of the built
+  EditForge.exe with its own FFmpeg, and the installer being made). Nobody has clicked through the installer on a real PC yet.
+* The installer is not code-signed, so Windows SmartScreen warns the first time ("More info", "Run anyway").
+
 ## Version 1.3.0 (follow, words, captions) - what was and was not checked
 * One pass on Linux, FFmpeg 6.1.1, Python 3.13, 2 CPUs, with OpenCV 4.14 installed: **699 passed, 0 failed, 1 skipped**
   (the skipped test is one that only runs when faster-whisper is NOT installed).
