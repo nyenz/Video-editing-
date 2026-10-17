@@ -38,10 +38,18 @@ def install_help() -> str:
 def _candidates(name: str) -> List[str]:
     env = os.environ.get("EDITFORGE_" + name.upper())
     out = [env] if env else []
+    exe = name + (".exe" if os.name == "nt" else "")
+    # The Windows app ships its own FFmpeg next to EditForge.exe (or inside the bundle); that one is preferred.
+    bundle_dirs = []
+    if getattr(sys, "frozen", False):
+        bundle_dirs.append(Path(sys.executable).resolve().parent)
+    if getattr(sys, "_MEIPASS", None):
+        bundle_dirs.append(Path(sys._MEIPASS))  # type: ignore[attr-defined]
+    for folder in bundle_dirs:
+        out.extend([str(folder / exe), str(folder / "ffmpeg" / exe)])
     found = shutil.which(name)
     if found:
         out.append(found)
-    exe = name + (".exe" if os.name == "nt" else "")
     for folder in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "C:\\ffmpeg\\bin",
                    "C:\\Program Files\\ffmpeg\\bin", str(Path.home() / "ffmpeg" / "bin")):
         out.append(str(Path(folder) / exe))

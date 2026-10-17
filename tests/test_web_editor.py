@@ -31,10 +31,10 @@ def new_project(c, fid, interval=2):
 
 def test_pages_are_served(web):
     c, _ = web
-    for path, word in (("/edit", b'id="grid"'), ("/combine", b'id="fileB"')):
+    for path, word in (("/edit", b'id="tlScroll"'), ("/combine", b'id="fileB"')):
         status, _, body = c.call("GET", path, token=False)
         assert status == 200 and word in body
-    for name in ("common.js", "editor.js", "editor.css", "combine.js"):
+    for name in ("ui.js", "editor.js", "ui.css", "combine.js"):
         assert c.call("GET", f"/static/{name}", token=False)[0] == 200
 
 

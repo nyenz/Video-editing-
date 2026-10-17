@@ -6,3 +6,8 @@ __pycache__/
 out/
 samples/
 *.part
+
+# Windows app build
+packaging/ffmpeg/
+build/
+dist/

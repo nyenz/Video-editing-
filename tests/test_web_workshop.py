@@ -78,13 +78,19 @@ def q(ident: str) -> str:
 def test_pages_and_static_files(web):
     c, _ = web
     status, headers, body = c.call("GET", "/", token=False)
-    assert status == 200 and b"Clip workshop" in body and b'id="player"' in body
+    assert status == 200 and b"Clips" in body and b'id="player"' in body and b"{{TOKEN}}" not in body
     assert "media-src 'self'" in headers["Content-Security-Policy"]
     status, _, body = c.call("GET", "/advanced", token=False)
     assert status == 200 and b'id="script"' in body
-    for name in ("workshop.js", "workshop.css", "app.js", "style.css"):
+    for name in ("workshop.js", "ui.css", "ui.js", "app.js", "logo.svg", "logo.png"):
         assert c.call("GET", f"/static/{name}", token=False)[0] == 200
+    for gone in ("style.css", "workshop.css", "common.js"):
+        assert c.call("GET", f"/static/{gone}", token=False)[0] == 404
     assert c.call("GET", "/static/../server.py", token=False)[0] == 404
+    status, headers, body = c.call("GET", "/favicon.ico", token=False)
+    assert status == 200 and body.startswith(b"<svg")
+    status, _, body = c.call("GET", "/api/hello", token=False)
+    assert status == 200 and b'"EditForge"' in body
 
 
 def test_info_reports_the_video(web, media):

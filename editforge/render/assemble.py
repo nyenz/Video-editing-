@@ -117,17 +117,27 @@ def parse_loudnorm_json(stderr: str) -> Optional[Dict[str, float]]:
     return vals
 
 
+def _mono_aac_rate(rate: str) -> str:
+    """One channel needs at most 128k. (Newer FFmpeg builds can also hang encoding silent mono AAC at 192k.)"""
+    try:
+        kbps = float(rate.lower().rstrip("k")) if rate.lower().endswith("k") else float(rate) / 1000.0
+    except ValueError:
+        return rate
+    return f"{int(min(kbps, 128))}k"
+
+
 def container_args(tl: Timeline, sr: int, layout: str) -> Tuple[List[str], str]:
     """(audio/container options, muxer name) for the chosen container."""
     out = tl.output
     ch = "1" if layout == "mono" else "2"
+    aac_rate = _mono_aac_rate(out.audio_bitrate) if ch == "1" else out.audio_bitrate
     if out.container in ("mp4", "mov"):
         fmt = "mp4" if out.container == "mp4" else "mov"
-        return ["-c:a", "aac", "-b:a", out.audio_bitrate, "-ar", str(sr), "-ac", ch, "-movflags", "+faststart"], fmt
+        return ["-c:a", "aac", "-b:a", aac_rate, "-ar", str(sr), "-ac", ch, "-movflags", "+faststart"], fmt
     if out.container == "mkv":
-        return ["-c:a", "aac", "-b:a", out.audio_bitrate, "-ar", str(sr), "-ac", ch], "matroska"
+        return ["-c:a", "aac", "-b:a", aac_rate, "-ar", str(sr), "-ac", ch], "matroska"
     if out.container == "m4a":
-        return ["-c:a", "aac", "-b:a", out.audio_bitrate, "-ar", str(sr), "-ac", ch, "-movflags", "+faststart"], "ipod"
+        return ["-c:a", "aac", "-b:a", aac_rate, "-ar", str(sr), "-ac", ch, "-movflags", "+faststart"], "ipod"
     if out.container == "mp3":
         return ["-c:a", "libmp3lame", "-b:a", out.audio_bitrate, "-ar", str(sr), "-ac", ch], "mp3"
     if out.container == "wav":

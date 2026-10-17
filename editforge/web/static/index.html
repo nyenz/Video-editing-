@@ -4,65 +4,54 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="ef-token" content="{{TOKEN}}">
-<title>EditForge</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="stylesheet" href="/static/workshop.css">
+<meta name="ef-version" content="{{VERSION}}">
+<title>Advanced · EditForge</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/ui.css">
 </head>
-<body>
-<header>
-  <h1>EditForge</h1>
-  <span class="sub">free video editing on your own computer &middot; version {{VERSION}}</span>
-  <nav class="tabs">
-    <a class="tab" href="/">Clip workshop</a>
-    <a class="tab" href="/edit">Editor</a>
-    <a class="tab" href="/combine">Combine</a>
-    <a class="tab on" href="/advanced">Advanced</a>
-  </nav>
-</header>
-<main>
-  <section id="step1" class="card">
-    <h2>1. Choose a video</h2>
-    <div id="drop" class="drop" tabindex="0">Drop a video or audio file here, or <label class="link">choose a file<input type="file" id="file" hidden></label></div>
-    <div id="uploadStatus" class="note"></div>
-    <label>Or pick one you already added: <select id="fileList"></select></label>
-    <div class="note" id="mediaNote"></div>
+<body class="scroll">
+<div class="page adv">
+  <section class="card">
+    <h2><i data-ic="film"></i>Video</h2>
+    <div class="row wrap">
+      <select id="fileList" data-wide="1" aria-label="Video"></select>
+      <button class="btn" id="addFile"><i data-ic="upload"></i>Add a file</button>
+      <span id="uploadStatus" class="note" aria-live="polite"></span>
+    </div>
+    <div id="uploadProg" class="prog" hidden><i></i></div>
+    <p class="hint" id="mediaNote"></p>
   </section>
 
-  <section id="step2" class="card">
-    <h2>2. Write your edit</h2>
-    <div class="row">
-      <label>Start from an example:
-        <select id="examples"><option value="">(none)</option></select>
-      </label>
-      <label>Style:
-        <select id="preset"></select>
-      </label>
-      <label class="inline"><input type="checkbox" id="preview"> Quick small preview</label>
-      <label class="inline" title="Cuts snap to keyframes and nothing is re-encoded. Very fast, but cuts are not frame-exact."><input type="checkbox" id="fast"> Fast cuts (not frame-exact)</label>
+  <section class="card">
+    <h2><i data-ic="code"></i>Write your edit</h2>
+    <p class="hint">For people who like typing. Each line is one instruction, for example <span class="kbd">keep 0:10-0:40</span> or <span class="kbd">speed 2 from 15 to 20</span>. Pick an example to see more.</p>
+    <div class="adv-opts">
+      <label class="field"><span>Start from an example</span><select id="examples"><option value="">None</option></select></label>
+      <label class="field"><span>Style</span><select id="preset"></select></label>
+      <label class="swl"><span>Quick small preview</span><input type="checkbox" class="sw" id="preview"></label>
+      <label class="swl" title="Cuts snap to keyframes and nothing is re-encoded. Very fast, but cuts are not frame-exact."><span>Fast cuts (not frame-exact)</span><input type="checkbox" class="sw" id="fast"></label>
     </div>
-    <textarea id="script" spellcheck="false" rows="14" placeholder="Example:&#10;keep 0:10-0:40&#10;speed 2 from 15 to 20&#10;loudnorm"></textarea>
+    <textarea id="script" class="input code" spellcheck="false" rows="14" placeholder="keep 0:10-0:40&#10;speed 2 from 15 to 20&#10;loudnorm"></textarea>
     <div id="problems" class="problems" aria-live="polite"></div>
     <div class="row">
-      <button id="planBtn" class="secondary">Show the plan</button>
-      <button id="runBtn" class="primary">Make the video</button>
-      <span id="actionNote" class="note"></span>
+      <span id="actionNote" class="note grow"></span>
+      <button class="btn" id="planBtn"><i data-ic="eye"></i>Show the plan</button>
+      <button class="btn primary" id="runBtn"><i data-ic="export"></i>Make the video</button>
     </div>
   </section>
 
   <section id="planCard" class="card" hidden>
-    <h2>Plan</h2>
-    <pre id="planSummary" class="summary"></pre>
-    <div id="timeline" class="timeline" aria-label="Timeline"></div>
+    <h2><i data-ic="layers"></i>Plan</h2>
+    <div class="box"><div class="stat"><span class="lbl">Finished length</span><b id="planLen"></b></div><div class="stat"><span class="lbl">Pieces</span><span class="num" id="planCount"></span></div></div>
+    <div id="timeline" class="plan-tl" aria-label="Timeline"></div>
+    <p id="planSummary" class="hint"></p>
     <div id="planWarnings" class="problems"></div>
-    <details><summary>Segment table</summary><table id="planTable"><thead></thead><tbody></tbody></table></details>
+    <details class="sec"><summary><i data-ic="list"></i><span>Every piece</span><i data-ic="chev" class="chev"></i></summary>
+      <div class="pad"><div class="table-wrap"><table id="planTable" class="tbl"><thead></thead><tbody></tbody></table></div></div></details>
   </section>
-
-  <section class="card">
-    <h2>Your jobs</h2>
-    <div id="jobs"></div>
-  </section>
-</main>
-<footer>Everything runs on this computer. Nothing is sent anywhere. <span id="features"></span></footer>
+  <p class="hint center" id="features"></p>
+</div>
+<script src="/static/ui.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

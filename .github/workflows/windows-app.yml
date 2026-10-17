@@ -1,0 +1,103 @@
+name: Windows app
+
+# Builds EditForge-Setup.exe: the one-file installer with Python, FFmpeg and the add-ons inside.
+# Every push to main checks that it still builds and runs. A tag like v1.4.0 also publishes it as a release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python parts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m pip install "opencv-python-headless>=4.8,<5" "faster-whisper>=1.0" "pyinstaller>=6.10" pytest-timeout
+
+      - name: Get FFmpeg
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+          $bin = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force packaging\ffmpeg | Out-Null
+          Copy-Item $bin.FullName packaging\ffmpeg\
+          Copy-Item (Join-Path $bin.DirectoryName "ffprobe.exe") packaging\ffmpeg\
+          $lic = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter LICENSE.txt | Select-Object -First 1
+          if ($lic) { Copy-Item $lic.FullName packaging\ffmpeg\FFMPEG-LICENSE.txt }
+          "$((Resolve-Path packaging\ffmpeg).Path)" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          packaging\ffmpeg\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+
+      - name: Run the tests on Windows
+        timeout-minutes: 25
+        shell: pwsh
+        run: |
+          python -m pytest -v -rfE --tb=line --timeout=180 -p no:cacheprovider tests/test_timecode.py tests/test_dsl.py tests/test_project.py tests/test_web_workshop.py tests/test_web_editor.py tests/test_desktop.py 2>&1 | Tee-Object -FilePath pytest.txt
+          $code = $LASTEXITCODE
+          # Show failures as annotations, so they can be read without the full log.
+          Get-Content pytest.txt | Select-String -Pattern "^(FAILED|ERROR)|Timeout|passed|failed" | Select-Object -Last 9 | ForEach-Object { Write-Output "::error title=test::$($_.Line)" }
+          $lines = Get-Content pytest.txt
+          $t = ($lines | Select-String -Pattern "Timeout" | Select-Object -First 1).LineNumber
+          if ($t) { $lines[[Math]::Max(0, $t - 4)..($t - 2)] | ForEach-Object { Write-Output "::error title=before timeout::$_" }
+                    $lines | Select-String -Pattern 'File ".*(tests|editforge).*", line' | Select-Object -First 8 | ForEach-Object { Write-Output "::warning title=stack::$($_.Line.Trim())" } }
+          Get-Content pytest.txt | Select-String -Pattern "^[A-Za-z]:\\.*:\d+: " | Select-Object -First 9 | ForEach-Object { Write-Output "::warning title=where::$($_.Line)" }
+          exit $code
+
+      - name: Build EditForge.exe
+        run: pyinstaller packaging/editforge.spec --noconfirm --distpath dist --workpath build
+
+      - name: Check the built app works
+        shell: pwsh
+        run: |
+          $env:EDITFORGE_SELFTEST_OUT = "$env:RUNNER_TEMP\selftest.txt"
+          $env:EDITFORGE_HOME = "$env:RUNNER_TEMP\efhome"
+          Remove-Item Env:\PATH -ErrorAction SilentlyContinue
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          $p = Start-Process dist\EditForge\EditForge.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content $env:EDITFORGE_SELFTEST_OUT
+          if ($p.ExitCode -ne 0) { throw "Self-test failed" }
+
+      - name: Make the installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          $ver = python -c "import editforge.version as v; print(v.__version__)"
+          & $iscc "/DMyVersion=$ver" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          Get-Item dist\EditForge-Setup.exe | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EditForge-Setup
+          path: dist/EditForge-Setup.exe
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/EditForge-Setup.exe
+          body: |
+            **Download EditForge-Setup.exe below, double-click it, and follow the steps.** It puts EditForge on your desktop and in the Start menu.
+            Everything is inside: no Python or FFmpeg to install. Windows may say "Windows protected your PC" the first time,
+            because the app is not signed: click **More info**, then **Run anyway**.
