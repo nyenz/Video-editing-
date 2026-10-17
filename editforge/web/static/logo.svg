@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#26303f"/><stop offset="1" stop-color="#121722"/></linearGradient>
+    <linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5fe3f2"/><stop offset="1" stop-color="#1fb3cc"/></linearGradient>
+    <linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7d95"/><stop offset="1" stop-color="#f04466"/></linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#bg)"/>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+  <!-- a play symbol cut in two: the left piece is the clip you keep, the right piece slid along the timeline -->
+  <path d="M20 16 L36.5 25.6 L27.2 41.5 L20 45.7 Z" fill="url(#a)"/>
+  <path d="M40.2 27.8 L49 33 L30.6 43.6 Z" fill="url(#b)"/>
+  <rect x="17" y="50" width="16" height="3" rx="1.5" fill="#5fe3f2"/>
+  <rect x="36" y="50" width="11" height="3" rx="1.5" fill="#ff7d95"/>
+</svg>

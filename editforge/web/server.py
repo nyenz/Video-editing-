@@ -42,10 +42,13 @@ from .. import combine as combine_mod
 from .. import project as project_mod
 
 STATIC_DIR = Path(__file__).parent / "static"
-STATIC_FILES = {"app.js": "application/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8",
-                "workshop.js": "application/javascript; charset=utf-8", "workshop.css": "text/css; charset=utf-8",
-                "editor.js": "application/javascript; charset=utf-8", "editor.css": "text/css; charset=utf-8",
-                "combine.js": "application/javascript; charset=utf-8", "common.js": "application/javascript; charset=utf-8"}
+JS, CSS = "application/javascript; charset=utf-8", "text/css; charset=utf-8"
+STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "combine.js": JS,
+                "logo.svg": "image/svg+xml", "logo.png": "image/png"}
+#: what browsers (Chrome, Edge, Brave, Firefox) play inside a page without help
+BROWSER_VIDEO = {"h264", "vp8", "vp9", "av1"}
+BROWSER_AUDIO = {"aac", "mp3", "opus", "vorbis", "flac"}
+BROWSER_CONTAINERS = {".mp4", ".m4v", ".mov", ".webm"}
 PAGES = {"/": "workshop.html", "/edit": "editor.html", "/combine": "combine.html", "/advanced": "index.html"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"}
 SUBTITLE_EXTS = {".srt", ".vtt"}
@@ -74,6 +77,23 @@ def clean_filename(name: str, default: str = "upload") -> str:
         stem, ext = name, ""
     stem = stem[:100] or default
     return stem + ("." + ext[:10] if ext else "")
+
+
+def playback_check(path: str, info: Dict[str, Any]) -> Tuple[bool, str]:
+    """Can a browser play this file directly, with picture AND sound? Returns (yes, reason when not).
+
+    Films often come as .mkv with Dolby sound (AC-3, E-AC-3, DTS): the picture may play but the
+    sound is silent, so the page makes a light copy with normal sound for watching.
+    """
+    ext = Path(path).suffix.lower()
+    if info.get("has_audio") and info.get("audio_codec") not in BROWSER_AUDIO:
+        return False, f"browsers cannot play {str(info.get('audio_codec') or 'this').upper()} sound"
+    if info.get("has_video"):
+        if ext not in BROWSER_CONTAINERS:
+            return False, f"browsers cannot open {ext or 'this kind of'} files"
+        if info.get("video_codec") not in BROWSER_VIDEO or info.get("pix_fmt") not in ("yuv420p", "yuvj420p"):
+            return False, f"browsers cannot show {info.get('video_codec') or 'this'} video"
+    return True, ""
 
 
 def examples_dir() -> Path:
@@ -148,12 +168,23 @@ class AppState:
                 self._fp_cache[key] = hit
         return hit
 
+    def media_view(self, src: str) -> Dict[str, Any]:
+        """Facts about a file for the page: length, size, and whether it plays in a browser as it is."""
+        info = probe_media(src).to_dict()
+        info.pop("path", None)
+        info["plays_in_browser"], info["playback_note"] = playback_check(src, info)
+        info["preview"] = self.previews.status(src) if info["has_video"] else {"state": "none", "progress": 0.0, "error": ""}
+        return info
+
     def thumbnail(self, src: str, at: float) -> Optional[Path]:
         """A small JPEG of the picture at ``at`` seconds (made once, then kept). None if it cannot be made."""
         ms = max(0, int(round(at * 1000)))
         out = self.thumbs / f"{self.fingerprint(src)}_{ms}.jpg"
         if out.is_file() and out.stat().st_size > 0:
             return out
+        light = self.previews.path_for(src)          # the light copy decodes many times faster than a big original
+        if light.is_file() and light.stat().st_size > 0:
+            src = str(light)
         part = out.with_name(out.name + f".{uuid.uuid4().hex[:8]}.part")
         with self._thumb_slots:
             res = run_ffmpeg(["-y", "-ss", f"{ms / 1000:.3f}", "-i", src, "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=-2:96",
@@ -353,7 +384,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._headers(200, "text/html; charset=utf-8", len(body))
                 self.wfile.write(body)
             elif path == "/favicon.ico":
-                self._headers(204, "image/x-icon", 0)
+                body = (STATIC_DIR / "logo.svg").read_bytes()
+                self._headers(200, "image/svg+xml", len(body), {"Cache-Control": "max-age=86400"})
+                self.wfile.write(body)
+            elif path == "/api/hello":
+                # No key needed: lets a second start of the app find this one instead of starting twice.
+                self._json({"app": "EditForge", "version": __version__})
             elif path.startswith("/static/"):
                 if self._guard(need_token=False) is None:
                     return
@@ -398,11 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                 query = self._guard()
                 if query is None:
                     return
-                src = self.state.resolve_input((query.get("id") or [""])[0])
-                info = probe_media(src).to_dict()
-                info.pop("path", None)
-                info["preview"] = self.state.previews.status(src) if info["has_video"] else {"state": "none", "progress": 0.0, "error": ""}
-                self._json(info)
+                self._json(self.state.media_view(self.state.resolve_input((query.get("id") or [""])[0])))
             elif path == "/api/preview":
                 query = self._guard()
                 if query is None:
@@ -589,8 +621,7 @@ class Handler(BaseHTTPRequestHandler):
     def _project_view(self, proj: Dict[str, Any]) -> Dict[str, Any]:
         """A project plus the facts about its video that the editor page needs."""
         try:
-            info = probe_media(self.state.resolve_input(proj["source"])).to_dict()
-            info.pop("path", None)
+            info = self.state.media_view(self.state.resolve_input(proj["source"]))
         except EditForgeError as exc:
             raise EditForgeError("The video this project was made from is gone.", "Delete this project and start a new one. (" + exc.message + ")")
         return {"project": proj, "info": info}

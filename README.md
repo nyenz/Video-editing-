@@ -3,46 +3,52 @@
 A free video editor that runs on your own computer. You write a few simple lines ("keep 0:10-0:40", "speed 2 from 15 to 20", "loudnorm") and
 EditForge makes the video. No accounts, no cloud, no tracking, nothing is sent anywhere.
 
-**Status: version 1.0.0, released early. Read SELF_REVIEW.md for what was and was not tested.**
+**Version 1.4.0.** Read SELF_REVIEW.md for what was and was not tested.
 
-## Install (about 5 minutes)
-1. Install **Python 3.10 or newer** (https://www.python.org/downloads/ - tick "Add python.exe to PATH") and **FFmpeg** (Windows: `winget install Gyan.FFmpeg`; Mac: `brew install ffmpeg`; Linux: `sudo apt install ffmpeg`).
-2. Unpack the folder. If you got the single text file, run: `python tools/extract_repo.py EditForge_v1_0_COMPLETE_REPO_SOURCE.txt` and open the `EditForge` folder.
-3. **Windows:** double-click `start.bat`. **Mac:** double-click `start.command`. **Linux:** `bash start.sh`.
-   The first start makes a private Python environment and installs two small packages (needs internet once). Your browser opens the EditForge page.
+## Install on Windows (one file, like any program)
+1. Open https://github.com/nyenz/Video-editing-/releases/latest and download **EditForge-Setup.exe**.
+2. Double-click it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway** (the app is free and not signed).
+3. Click **Next** until it is done. EditForge is now on your desktop and in the Start menu, with its own icon.
 
-The launchers check for FFmpeg and tell you how to install it if it is missing.
+Everything is inside: Python, FFmpeg, face tracking and automatic captions. Nothing else to install.
+EditForge opens in its own window. Close the window to stop it (a video still being made is finished first).
 
-## Your first clips (no typing)
-The page that opens is the **Clip workshop**:
-1. **Choose a video.** Drop it on the page, or click "choose a file".
-2. **Find the part you want.** Play the video. Press **Set START here** where the part begins and **Set END here** where it ends, then **+ Add clip**. Repeat for every part you want.
-3. **Make the clips.** Choose "One video per clip" or "Join all clips into one video", then press **Make the clips**.
-4. **Finished videos** appear at the bottom. Press **Watch** to check one, **Save to my computer** to keep it, or **Edit this video** to cut it again.
+**Mac and Linux:** install Python 3.10+ and FFmpeg (`brew install ffmpeg` or `sudo apt install ffmpeg`), then run `start.command` or `bash start.sh`.
 
-Use Google Chrome or Microsoft Edge. If a video will not play, EditForge makes a light copy for watching; your clips are still cut from the original, so quality is not lost.
-For a very big video, copy it into the EditForge media folder (the page shows where) instead of dropping it on the page.
+## The four pages
+The bar at the top has **Clips**, **Editor**, **Combine** and **Advanced**. **Exports** (top right) lists the videos you made:
+watch them, **Save** them, or open them in the Editor. The length of what you are making is always shown.
 
-## The Editor: pieces, patterns and edits
-Click **Editor** at the top (or press **Slice and edit this** on any video).
-1. **Cut the video into pieces.** Type the seconds for each piece (for example 2) and press **Cut into pieces**. If you chose music in step 4, **Cut on the beat** cuts on every 4th beat instead.
-2. **Pick pieces.** Click a piece to pick it. Shift-click picks everything in between. For a pattern, set "In every group of 3", tick the numbers you want (1, 2, 3) and press **Pick by pattern**.
-3. **Change the picked pieces.** Remove, flip, mirror, speed, backwards, zoom, colour, sound, make longer or shorter, move, copy. You can mix patterns and hand edits in any order. **Undo** takes back the last change.
-4. **The whole video.** Shape (for example tall 9:16 for TikTok), what happens between pieces, music, fades and quality.
-5. **Make the video.** **Quick preview** makes a small fast version to check. **Make the video** makes the full-quality one.
+### Clips: cut parts out of a long video
+1. Drop a video on the left (or pick one you added before).
+2. Play it. Press **Start here** and **End here** (or the keys **I** and **O**), or simply drag across the strip in the timeline.
+   The length shows while you mark. Drag the yellow edges to change it.
+3. Press **Add clip** (or **Enter**). Repeat. The list on the right shows each clip's length and the total.
+4. Tick clips to use only those. **Join** makes one video of them (the length shows on the button); **Separate** makes one video each.
 
-Also in the Editor:
-* **Follow** (step 3). **Follow the face** zooms in and keeps the face in the middle. **Follow a thing** lets you drag a box around anything on the video; the view then follows it through the picked pieces. Both need the free OpenCV add-on (see "Optional add-ons").
-* **Words on the picture** (step 4). Press **+ Add words**, type them, and set from which second to which second they show.
-* **Captions** (step 4). Choose "Automatic" (needs the faster-whisper add-on) or add a subtitle file (.srt).
+Films with Dolby or DTS sound (often .mkv) play silent or black in a browser. EditForge sees this and makes a light copy with
+normal sound for watching. Your clips are always cut from the original, so quality is not lost.
 
-**Save this pattern** keeps the pattern together with the edits of the first picked piece. **Use** applies it to any project.
+### Editor: pieces on a timeline, like CapCut
+1. Choose a video and a piece length (for example 2 seconds). It opens already cut into pieces.
+2. **Pattern** (left): "in every group of 3, number 1". **Remove these** or **Keep only these**. The timeline and the viewer change at
+   once, no waiting. The new length shows at the top.
+3. Work in the timeline: **play** (Space), **click** a piece to select it, **Ctrl+click** or drag across empty space to select several,
+   **drag** pieces to move them, **drag a piece's edge** to make it longer or shorter (the tooltip shows the piece and video length),
+   **S** splits at the red playhead, **Delete** removes, **Ctrl+Z** undoes. Removed pieces can be put back (right side).
+4. The right side shows the selected pieces: speed, loudness, mute, start and end. **Effects, Colour, Zoom and Follow** are folded away
+   until you open them.
+5. **Finish** (left, below the line): **Audio** (music, beat cuts), **Format** (tall 9:16, square, transitions, fades), **Text** (words, captions).
+6. **Export** (top right): see the length and size, then **Quick preview** or **Export**.
 
-## Combine two videos
-Click **Combine** at the top. Choose two videos and how to put them together: one after the other, side by side, top and bottom, a small one in a corner, or one over the other.
+The viewer plays your edit live from a light copy; the export is made from the original, exact to the frame.
 
-## Your first scripted edit
-Click **Advanced (type a script)** at the top. Drop a video in step 1, pick an example in step 2 (or type), press **Show the plan**, then **Make the video**. Download it when the bar reaches 100%.
+### Combine two videos
+Choose two videos and a layout: one after the other, side by side, top and bottom, small one in a corner, or one over the other.
+The finished length and picture size show before you press **Combine**.
+
+### Advanced: type your edit
+Pick a video, pick an example (or type), press **Show the plan**, then **Make the video**.
 
 Or in a terminal:
 ```

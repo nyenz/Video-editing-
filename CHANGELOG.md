@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0
+* **New look.** A dark, calm editing-suite design with real icons, custom menus, switches and sliders everywhere (no plain browser
+  controls), and an app icon for the window, the taskbar, the desktop and the browser tab.
+* **One-file Windows installer** (`EditForge-Setup.exe`): Python, FFmpeg, face tracking and captions inside. EditForge opens in its own
+  window and stops when you close it. Built and tested on Windows by GitHub Actions for every change; tags publish a release.
+* **Editor rebuilt like CapCut:** tools on the left, the selected pieces on the right, a real timeline at the bottom.
+  Patterns change the timeline and the viewer at once. Drag to move pieces, drag edges to trim or extend, select many (Ctrl, Shift or a box),
+  split at the playhead, undo. The viewer plays the edit live, without making a video first. Secondary things (effects, colour, zoom, follow)
+  are folded away; music, shape and text are in a separate "Finish" group.
+* **Length everywhere:** the finished length is always on screen and updates while you drag; the marked part, each clip, ticked clips
+  and the combined result all show their length before anything is made.
+* **Clips page:** mark parts by dragging on a timeline strip, tick clips and join just those, see the joined length on the button.
+* **Sound from the start:** films with Dolby/DTS sound or formats a browser cannot play get a light copy with normal sound automatically.
+* **Combine** shows the finished length and size before combining. A single **Exports** panel on every page.
+
 ## 1.3.0
 * **Follow** (Editor, step 3): zoom in and keep a face in the middle, or draw a box around any thing and the view follows it.
   Works in the original shape, piece by piece. Faces are now also found when they are small in a wide shot.
