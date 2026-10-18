@@ -77,12 +77,14 @@ def q(ident: str) -> str:
 
 def test_pages_and_static_files(web):
     c, _ = web
-    status, headers, body = c.call("GET", "/", token=False)
-    assert status == 200 and b"Clips" in body and b'id="player"' in body and b"{{TOKEN}}" not in body
+    status, headers, body = c.call("GET", "/", token=False)                 # Home
+    assert status == 200 and b"Create project" in body and b'id="grid"' in body and b"{{TOKEN}}" not in body
     assert "media-src 'self'" in headers["Content-Security-Policy"]
+    status, headers, body = c.call("GET", "/clips", token=False)
+    assert status == 200 and b"Clips" in body and b'id="player"' in body and b"{{TOKEN}}" not in body
     status, _, body = c.call("GET", "/advanced", token=False)
     assert status == 200 and b'id="script"' in body
-    for name in ("workshop.js", "ui.css", "ui.js", "app.js", "logo.svg", "logo.png"):
+    for name in ("workshop.js", "ui.css", "ui.js", "app.js", "home.js", "steps.js", "logo.svg", "logo.png"):
         assert c.call("GET", f"/static/{name}", token=False)[0] == 200
     for gone in ("style.css", "workshop.css", "common.js"):
         assert c.call("GET", f"/static/{gone}", token=False)[0] == 404

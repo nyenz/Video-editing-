@@ -177,7 +177,7 @@ def run() -> int:
     srv = state = None
     for port in [8765 + i for i in range(20)] + [0]:
         try:
-            srv, state = make_server("127.0.0.1", port)
+            srv, state = make_server("127.0.0.1", port, app_mode=True)
             break
         except OSError:
             continue
@@ -194,17 +194,26 @@ def run() -> int:
 
     browser = find_browser()
     proc = open_window(url, browser)
+    quitting = threading.Event()
+
+    def quit_app() -> None:
+        """Close the window and stop (used by the updater, after the installer has started)."""
+        quitting.set()
+        _close_window(proc)
+
+    state.quit_app = quit_app
     try:
         if proc is None:
             _fallback_window(url)
         else:
-            proc.wait()
+            while proc.poll() is None and not quitting.is_set():
+                time.sleep(0.5)
             # Edge may pass the window to another process; wait until no process uses our profile.
             quiet = 0
-            while quiet < 3:
+            while quiet < 3 and not quitting.is_set():
                 time.sleep(1)
                 quiet = 0 if _window_still_open() else quiet + 1
-        while _jobs_busy(state):
+        while _jobs_busy(state) and not quitting.is_set():
             log("window closed; finishing a video that is still being made")
             time.sleep(3)
     except KeyboardInterrupt:
@@ -220,6 +229,26 @@ def run() -> int:
         srv.shutdown()
         srv.server_close()
     return 0
+
+
+def _close_window(proc: Optional[subprocess.Popen]) -> None:
+    """Close the app window (every browser process that uses EditForge's own profile)."""
+    try:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+    except OSError:
+        pass
+    try:
+        import psutil
+    except ImportError:
+        return
+    key = str(_profile_dir())
+    for p in psutil.process_iter(["cmdline"]):
+        try:
+            if any(key in part for part in (p.info.get("cmdline") or [])):
+                p.terminate()
+        except Exception:  # noqa: BLE001
+            continue
 
 
 def _fallback_window(url: str) -> None:
@@ -257,37 +286,55 @@ def selftest() -> int:
         ok = ok and good
         _say(("OK   " if good else "FAIL ") + what)
 
-    from .core.ffmpeg import find_executable
-    ff, fp = find_executable("ffmpeg"), find_executable("ffprobe")
-    say(bool(ff and fp), f"FFmpeg found: {ff}")
-    if ff:
-        out = subprocess.run([ff, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=60).stdout
-        say("libx264" in out, "FFmpeg can make H.264 video")
-    try:
-        import cv2  # noqa: F401
-        say(hasattr(cv2, "CascadeClassifier"), "face tracking add-on")
-    except Exception as exc:  # noqa: BLE001
-        _say("INFO face tracking add-on not included: " + str(exc))
-    try:
-        import faster_whisper  # noqa: F401
-        _say("OK   captions add-on")
-    except Exception as exc:  # noqa: BLE001
-        _say("INFO captions add-on not included: " + str(exc))
     import tempfile
+    try:
+        import psutil
+        since = time.time() - psutil.Process().create_time()
+    except Exception:  # noqa: BLE001
+        since = None
+    t0 = time.perf_counter()
     from .web.server import make_server
     home = Path(tempfile.mkdtemp(prefix="editforge-selftest-"))
     srv, state = make_server("127.0.0.1", 0, home=home)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         say(_hello(state.port, 5), "web server answers")
-        for path, word in (("/", b"workshop.js"), ("/edit", b"editor.js"), ("/static/ui.js", b"enhanceSelect")):
+        if since is not None:
+            _say(f"TIME app start to web server ready: {since + time.perf_counter() - t0:.2f} s")
+        for path, word in (("/", b"home.js"), ("/clips", b"workshop.js"), ("/edit", b"editor.js"), ("/edit", b"steps.js"),
+                           ("/static/ui.js", b"enhanceSelect")):
+            t = time.perf_counter()
             with urllib.request.urlopen(f"http://127.0.0.1:{state.port}{path}", timeout=5) as r:
                 say(word in r.read(), "page " + path)
+            _say(f"TIME page {path}: {time.perf_counter() - t:.3f} s")
+        t = time.perf_counter()
+        req = urllib.request.Request(f"http://127.0.0.1:{state.port}/api/state", headers={"X-EditForge-Token": state.token})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            feats = json.loads(r.read())["features"]
+        _say(f"TIME features check: {time.perf_counter() - t:.3f} s ({feats})")
     finally:
         state.manager.shutdown()
         state.previews.shutdown()
         srv.shutdown()
         srv.server_close()
+    from .core.ffmpeg import find_executable
+    ff, fp = find_executable("ffmpeg"), find_executable("ffprobe")
+    say(bool(ff and fp), f"FFmpeg found: {ff}")
+    if ff:
+        out = subprocess.run([ff, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=60).stdout
+        say("libx264" in out, "FFmpeg can make H.264 video")
+    t = time.perf_counter()
+    try:
+        import cv2  # noqa: F401
+        say(hasattr(cv2, "CascadeClassifier"), f"face tracking add-on (loads in {time.perf_counter() - t:.2f} s, only when used)")
+    except Exception as exc:  # noqa: BLE001
+        _say("INFO face tracking add-on not included: " + str(exc))
+    t = time.perf_counter()
+    try:
+        import faster_whisper  # noqa: F401
+        _say(f"OK   captions add-on (loads in {time.perf_counter() - t:.2f} s, only when used)")
+    except Exception as exc:  # noqa: BLE001
+        _say("INFO captions add-on not included: " + str(exc))
     _say("ALL OK" if ok else "SOME CHECKS FAILED")
     return 0 if ok else 1
 

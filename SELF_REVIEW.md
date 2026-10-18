@@ -1,5 +1,19 @@
 # Self review (honest)
 
+## Version 1.5.0 (Home, linked files, steps, sound clean-up, updates) - what was and was not checked
+Checked here (Linux sandbox): 740+ tests pass, 21 new ones in `tests/test_v15.py` (gzip and caching, the add-on check not loading
+OpenCV/Whisper, remembered video facts, quick copy before the light copy, linked files incl. refused ids and restart, projects list /
+rename / duplicate / trash / Find it again, sent-in copies deleted only when unused, storage clean-up, three stacked steps keeping parent
+times, extending into footage an earlier step removed, export length equals the last step, steps.js giving the same answers as Python,
+vocal removal measured on the sound, update check / skip / offline / download fingerprint). Screens were looked at in a headless Chromium
+(Home, Storage, Editor steps) - that Chromium cannot play H.264, so the viewer was black there.
+
+NOT checked:
+* The Windows file window (comdlg32) has never been opened on a real PC; if it fails the page falls back to sending a copy.
+* The automatic update has never run end to end (download, silent install, reopen). It can only be tried from 1.5.0 to the next version.
+* Sound clean-up is only heard in Quick preview and the export, not in the live viewer.
+* The old points below still stand: installer not clicked through on a real PC, MKV with AC-3 not tried in Brave, feel not judged by eye.
+
 ## Version 1.4.0 (redesign and Windows installer) - what was and was not checked
 * Tests: **704 passed, 0 failed, 1 skipped** on Linux, both with FFmpeg 6.1 and with FFmpeg 8.1 (the version inside the Windows app).
   On Windows (GitHub Actions) 223 tests pass, then the built EditForge.exe passes its self-test using its own FFmpeg.

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ef-token" content="{{TOKEN}}">
+<meta name="ef-version" content="{{VERSION}}">
+<title>Nyenz Edit</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/ui.css">
+</head>
+<body>
+<div class="home">
+  <aside class="home-side" aria-label="Pages">
+    <a class="brand" href="/"><img src="/static/logo.svg" alt=""><span>Nyenz Edit</span></a>
+    <nav class="home-nav" id="homeNav"></nav>
+    <span class="grow"></span>
+    <button class="home-link" id="storageBtn" type="button"><i data-ic="disk"></i><span>Storage</span></button>
+    <span class="note ver">Version {{VERSION}}</span>
+  </aside>
+
+  <main class="home-main">
+    <div class="home-top" id="homeTop"></div>
+
+    <section class="create" id="create" tabindex="0" role="button" aria-label="Create project">
+      <span class="create-plus"><i data-ic="plus"></i></span>
+      <span class="create-t"><b>Create project</b><span>Choose a video. It is used where it is, nothing is copied.</span></span>
+      <div id="createProg" class="prog" hidden><i></i></div>
+    </section>
+
+    <div class="tools" id="tools"></div>
+
+    <div class="proj-bar">
+      <h2 id="projTitle">Projects</h2>
+      <span class="note num" id="projCount"></span>
+      <span class="grow"></span>
+      <label class="search"><i data-ic="search" class="s"></i><input id="search" class="input slim" placeholder="Search" aria-label="Search projects"></label>
+      <div id="viewToggle"></div>
+      <button class="btn ghost" id="trashBtn" type="button"><i data-ic="trash" class="s"></i><span id="trashLabel">Trash</span><span class="count" id="trashCount" hidden></span></button>
+      <button class="btn ghost danger" id="emptyTrash" type="button" hidden><i data-ic="x" class="s"></i><span>Empty trash</span></button>
+    </div>
+    <div class="proj-scroll" id="projScroll"><div class="proj-grid" id="grid"></div></div>
+  </main>
+</div>
+
+<script src="/static/ui.js"></script>
+<script src="/static/home.js"></script>
+</body>
+</html>

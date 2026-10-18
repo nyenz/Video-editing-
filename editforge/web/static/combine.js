@@ -85,9 +85,12 @@ function summary() {
   for (const id of ["fileA", "fileB"]) $(id).addEventListener("change", facts);
   for (const n of document.querySelectorAll(".opts select")) n.addEventListener("change", summary);
   $("addFile").addEventListener("click", async () => {
-    const f = await pickFile("video/*,.mkv,.mov,.avi,.ts"); if (!f) return;
-    const bar = $("addProg"); bar.hidden = false; $("addStatus").textContent = "Adding " + f.name + "…";
-    try { const d = await uploadFile(f, (k) => { bar.firstChild.style.width = Math.round(k * 100) + "%"; }); $("addStatus").textContent = ""; await loadFiles(d.id); }
+    const bar = $("addProg");
+    try {
+      const d = await chooseFile("video", (k) => { bar.hidden = false; bar.firstChild.style.width = Math.round(k * 100) + "%"; });
+      if (!d) return;
+      $("addStatus").textContent = d.linked ? "Used where it is: " + d.where : ""; await loadFiles(d.id);
+    }
     catch (e) { $("addStatus").textContent = errText(e); }
     finally { bar.hidden = true; }
   });

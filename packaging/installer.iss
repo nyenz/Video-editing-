@@ -6,10 +6,10 @@
 
 [Setup]
 AppId={{6E2C1B4A-5D2B-4C69-9E57-ED17F0F0A1B5}
-AppName=EditForge
+AppName=Nyenz Edit
 AppVersion={#MyVersion}
-AppVerName=EditForge {#MyVersion}
-AppPublisher=EditForge
+AppVerName=Nyenz Edit {#MyVersion}
+AppPublisher=Nyenz Edit
 AppPublisherURL=https://github.com/nyenz/Video-editing-
 DefaultDirName={localappdata}\Programs\EditForge
 DefaultGroupName=EditForge
@@ -19,7 +19,7 @@ OutputDir=..\dist
 OutputBaseFilename=EditForge-Setup
 SetupIconFile=editforge.ico
 UninstallDisplayIcon={app}\EditForge.exe
-UninstallDisplayName=EditForge
+UninstallDisplayName=Nyenz Edit (EditForge)
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -28,14 +28,27 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 
 [Tasks]
-Name: "desktopicon"; Description: "Put an EditForge icon on the desktop"; GroupDescription: "Icons:"
+Name: "desktopicon"; Description: "Put a Nyenz Edit icon on the desktop"; GroupDescription: "Icons:"
+
+[InstallDelete]
+; the icons were called "EditForge" before version 1.5.0
+Type: files; Name: "{autoprograms}\EditForge.lnk"
+Type: files; Name: "{autodesktop}\EditForge.lnk"
 
 [Files]
 Source: "..\dist\EditForge\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\EditForge"; Filename: "{app}\EditForge.exe"; Comment: "Edit videos on this computer"
-Name: "{autodesktop}\EditForge"; Filename: "{app}\EditForge.exe"; Tasks: desktopicon; Comment: "Edit videos on this computer"
+Name: "{autoprograms}\Nyenz Edit"; Filename: "{app}\EditForge.exe"; Comment: "Edit videos on this computer"
+Name: "{autodesktop}\Nyenz Edit"; Filename: "{app}\EditForge.exe"; Tasks: desktopicon; Comment: "Edit videos on this computer"
 
 [Run]
-Filename: "{app}\EditForge.exe"; Description: "Open EditForge now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\EditForge.exe"; Description: "Open Nyenz Edit now"; Flags: nowait postinstall skipifsilent
+; after an automatic update (the app runs the installer with /SILENT /RELAUNCH) open the app again
+Filename: "{app}\EditForge.exe"; Flags: nowait runasoriginaluser; Check: Relaunch
+
+[Code]
+function Relaunch(): Boolean;
+begin
+  Result := WizardSilent() and (Pos('/RELAUNCH', Uppercase(GetCmdTail())) > 0);
+end;

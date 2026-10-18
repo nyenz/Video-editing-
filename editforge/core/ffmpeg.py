@@ -273,8 +273,65 @@ def _terminate(proc: subprocess.Popen) -> None:
         pass
 
 
+_PROBE_MEMO: Dict[Tuple[str, int, int], dict] = {}
+
+
+def _probe_key(path: str) -> Optional[Tuple[str, int, int]]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (os.path.abspath(path), st.st_size, st.st_mtime_ns)
+
+
 def run_ffprobe_json(path: str, extra: Sequence[str] = ()) -> dict:
-    """Run ffprobe on a file and return its JSON answer."""
+    """Run ffprobe on a file and return its JSON answer.
+
+    The answer is kept (in memory and on disk) for as long as the file keeps its size and time,
+    so opening the same video again is instant instead of waiting for ffprobe.
+    """
+    key = None if extra else _probe_key(path)
+    if key is not None:
+        with _LOCK:
+            hit = _PROBE_MEMO.get(key)
+        if hit is not None:
+            return json.loads(json.dumps(hit))
+        disk = _probe_disk(key)
+        try:
+            data = json.loads(disk.read_text(encoding="utf-8")) if disk else None
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict):
+            with _LOCK:
+                _PROBE_MEMO[key] = data
+            return json.loads(json.dumps(data))
+    data = _run_ffprobe_json(path, extra)
+    if key is not None and (data.get("streams") or data.get("format")):
+        with _LOCK:
+            if len(_PROBE_MEMO) > 2000:
+                _PROBE_MEMO.clear()
+            _PROBE_MEMO[key] = json.loads(json.dumps(data))
+        disk = _probe_disk(key)
+        if disk:
+            try:
+                from .cache import atomic_write_text
+                atomic_write_text(disk, json.dumps(data))
+            except OSError:
+                pass
+    return data
+
+
+def _probe_disk(key: Tuple[str, int, int]) -> Optional[Path]:
+    try:
+        import hashlib
+        from .cache import home_dir
+        name = hashlib.sha256(repr(key).encode("utf-8")).hexdigest()[:32]
+        return home_dir() / "probe" / (name + ".json")
+    except Exception:  # noqa: BLE001 - a cache must never stop the work
+        return None
+
+
+def _run_ffprobe_json(path: str, extra: Sequence[str] = ()) -> dict:
     tools = get_tools()
     cmd = [tools.ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", *extra, path]
     proc = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=120)

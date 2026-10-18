@@ -11,7 +11,7 @@ async function loadState() {
   sel.replaceChildren(el("option", { value: "", text: "Same as the original" }));
   for (const p of st.presets) sel.append(el("option", { value: p.name, text: p.label }));
   $("features").textContent = "Captions: " + (st.features.captions ? "on" : "off (add-on not installed)") + " · Face tracking: " + (st.features.faces ? "on" : "off (add-on not installed)");
-  $("mediaNote").textContent = "Big files: copy them into " + st.media_dir + " and they appear in the list.";
+  $("mediaNote").textContent = "Choose file uses a video where it is on your computer: nothing is copied, even for very big files.";
 }
 async function loadFiles(select) {
   const { files } = await api("/api/files");
@@ -89,9 +89,12 @@ async function run() {
   topBar("/advanced");
   paintIcons();
   $("addFile").addEventListener("click", async () => {
-    const f = await pickFile(""); if (!f) return;
-    const bar = $("uploadProg"); bar.hidden = false; $("uploadStatus").textContent = "Adding " + f.name + "…";
-    try { const d = await uploadFile(f, (k) => { bar.firstChild.style.width = Math.round(k * 100) + "%"; }); $("uploadStatus").textContent = "Ready: " + d.name; await loadFiles(d.id); }
+    const bar = $("uploadProg");
+    try {
+      const d = await chooseFile("media", (k) => { bar.hidden = false; bar.firstChild.style.width = Math.round(k * 100) + "%"; $("uploadStatus").textContent = "Copying… " + Math.round(k * 100) + "%"; }, "");
+      if (!d) return;
+      $("uploadStatus").textContent = "Ready: " + d.name + (d.linked ? " (used where it is)" : ""); await loadFiles(d.id);
+    }
     catch (e) { $("uploadStatus").textContent = errText(e); }
     finally { bar.hidden = true; }
   });

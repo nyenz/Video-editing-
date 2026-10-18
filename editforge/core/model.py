@@ -189,6 +189,9 @@ class MusicSpec:
 class AudioSpec:
     loudnorm: Optional[Dict[str, float]] = None
     denoise: Optional[Dict[str, Any]] = None
+    # sound clean-up of the video's own sound: {"vocals": "keep"|"remove"|"voice", "boost": bool, "compress": bool,
+    # "bass": dB, "treble": dB}. Applied after noise removal, before music is mixed in.
+    voice: Optional[Dict[str, Any]] = None
     music: List[MusicSpec] = field(default_factory=list)
     fade_in: float = 0.0
     fade_out: float = 0.0

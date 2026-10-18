@@ -2,6 +2,8 @@
 // The Editor: a video cut into pieces on a timeline, played live as you edit.
 // Model: S.proj.pieces is the list the server renders. Pieces with off=true are not in the timeline
 // (they are "removed" and can be put back). The timeline shows the other pieces, in order.
+// Steps: S.proj.steps are pinned (locked) earlier steps; S.proj.pieces is the newest step, the one you edit.
+// Every piece is a range of the PARENT video, so nothing is rendered between steps (see steps.js).
 
 const S = {
   id: new URLSearchParams(location.search).get("p") || "",
@@ -12,6 +14,7 @@ const S = {
   t: 0,                                      // playhead, seconds of the finished video
   playing: false, useLight: false, mutedAll: false,
   panel: "media",
+  viewStep: null,                            // null: the newest step (editable); a number: an older, locked step shown
 };
 const MIN_PIECE = 0.1;
 const LOOKS = [["hflip", "Flip", "fliph"], ["mirror", "Mirror", "mirror"], ["vflip", "Upside down", "flipv"], ["grayscale", "Black & white", "drop"],
@@ -35,7 +38,11 @@ function fixPiece(p) {
 }
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const outLen = (p) => (p.end - p.start) / p.speed;
-function kept() { return S.proj.pieces.filter((p) => !p.off); }
+/** The pieces on screen: the newest step, or an older step being looked at. */
+function cur() { return S.viewStep === null ? S.proj.pieces : S.proj.steps[S.viewStep].pieces; }
+function kept() { return cur().filter((p) => !p.off); }
+function locked() { return S.viewStep !== null; }
+function markHand() { S.proj.rule = Object.assign({ interval: 0, group: 1, picks: [], action: "" }, S.proj.rule || {}, { hand: true }); }
 /** The timeline: kept pieces with their place in the finished video. */
 function layout() {
   let t = 0;
@@ -60,12 +67,13 @@ function segAt(t) {
 function selList() { return kept().filter((p) => S.sel.has(p)); }
 
 // ================================================================== saving and undo
-function snapshot() { return JSON.stringify({ pieces: S.proj.pieces, settings: S.proj.settings, name: S.proj.name, texts: S.proj.texts }); }
+function snapshot() { return JSON.stringify({ pieces: S.proj.pieces, settings: S.proj.settings, name: S.proj.name, texts: S.proj.texts, steps: S.proj.steps, rule: S.proj.rule }); }
 function remember() { S.undo.push(snapshot()); if (S.undo.length > 80) S.undo.shift(); S.redo = []; }
 function restore(json) {
   const d = JSON.parse(json);
   const keepSel = selList().map((p) => S.proj.pieces.indexOf(p));
   Object.assign(S.proj, d); S.proj.pieces.forEach(fixPiece);
+  if (S.viewStep !== null && S.viewStep >= S.proj.steps.length) S.viewStep = null;
   S.sel = new Set(keepSel.map((i) => S.proj.pieces[i]).filter((p) => p && !p.off));
   refreshAll(); scheduleSave();
 }
@@ -74,7 +82,7 @@ function redo() { if (!S.redo.length) return; S.undo.push(snapshot()); restore(S
 function scheduleSave() { $("saveState").textContent = "Saving…"; clearTimeout(S.saveTimer); S.saveTimer = setTimeout(saveNow, 500); }
 function saveNow() {
   clearTimeout(S.saveTimer); S.saveTimer = null;
-  const body = { name: S.proj.name, pieces: S.proj.pieces, settings: S.proj.settings, texts: S.proj.texts };
+  const body = { name: S.proj.name, pieces: S.proj.pieces, settings: S.proj.settings, texts: S.proj.texts, steps: S.proj.steps, rule: S.proj.rule };
   S.saving = S.saving.then(() => api("/api/projects/" + S.id, { method: "PUT", json: body }))
     .then(() => { if (!S.saveTimer) $("saveState").textContent = "Saved"; })
     .catch((e) => { $("saveState").textContent = "Not saved"; toast("Not saved: " + errText(e), true); });
@@ -82,11 +90,14 @@ function saveNow() {
 }
 /** Change the project: remember for Undo, apply, redraw, save. */
 function change(fn, opts) {
+  if (locked() && !(opts && (opts.any || opts.keepVideo))) { lockedNote(); return false; }      // settings, words and music stay editable
   remember(); fn(); refreshAll(opts); scheduleSave();
+  return true;
 }
+function lockedNote() { toast("This is an older step, so it is locked. Click the newest step (in Steps) to change things.", true); }
 function refreshAll(opts) {
-  S.sel = new Set([...S.sel].filter((p) => !p.off && S.proj.pieces.includes(p)));
-  renderTimeline(); renderInspector(); renderLengths();
+  S.sel = new Set([...S.sel].filter((p) => !p.off && cur().includes(p)));
+  renderTimeline(); renderInspector(); renderLengths(); renderSteps();
   if (!(opts && opts.keepVideo)) showFrame();
 }
 
@@ -319,7 +330,7 @@ function renderTimeline() {
     if (x1 < left || x0 > right) continue;                    // only what is on screen is drawn, so 5,000 pieces stay quick
     const w = Math.max(4, x1 - x0 - 2);
     const p = r.p;
-    const b = el("div", { class: "clipb" + (S.sel.has(p) ? " sel" : "") + (w < 70 ? " narrow" : ""), "data-k": String(S.proj.pieces.indexOf(p)) });
+    const b = el("div", { class: "clipb" + (S.sel.has(p) ? " sel" : "") + (w < 70 ? " narrow" : "") + (locked() ? " locked" : ""), "data-k": String(cur().indexOf(p)) });
     b.style.left = x0 + "px"; b.style.width = w + "px";
     if (S.info.has_video) {
       const strip = el("div", { class: "strip" });
@@ -359,7 +370,7 @@ function renderTimeline() {
 // ---- pointer work on the timeline: select, drag to move, drag edges to trim, marquee, scrub
 function pieceFromEvent(e) {
   const b = e.target.closest(".clipb");
-  return b ? S.proj.pieces[+b.dataset.k] : null;
+  return b ? cur()[+b.dataset.k] : null;
 }
 function showTip(text, x, y) {
   let t = $("tlTip"); if (!t) { t = el("div", { class: "tip", id: "tlTip" }); document.body.append(t); }
@@ -384,13 +395,14 @@ function onLaneDown(e) {
   const p = pieceFromEvent(e);
   const edge = e.target.dataset && e.target.dataset.edge;
   sc.setPointerCapture(e.pointerId);
-  if (p && edge) {                                             // trim an edge
+  if (p && edge && locked()) { lockedNote(); return; }
+  if (p && edge) {                                             // trim an edge: it may grow into any footage no other piece uses
     if (!S.sel.has(p)) { S.sel = new Set([p]); S.anchor = p; }
-    T.drag = { kind: "trim", p, edge, x0: xIn(e), start: p.start, end: p.end, snap: snapshot(), moved: false };
+    T.drag = { kind: "trim", p, edge, x0: xIn(e), start: p.start, end: p.end, snap: snapshot(), moved: false, lim: Steps.extendLimits(S.proj.pieces, p, S.info.duration) };
   } else if (p) {                                              // select, maybe move
     const wasSel = S.sel.has(p) && !(e.ctrlKey || e.metaKey || e.shiftKey) && S.sel.size > 1;
     selectClick(p, e);
-    T.drag = { kind: "move", p, x0: xIn(e), moved: false, wasSel };
+    T.drag = { kind: "move", p, x0: xIn(e), moved: locked(), wasSel, frozen: locked() };
     renderTimeline(); renderInspector(); renderLengths();
   } else {                                                     // empty space: marquee or seek
     T.drag = { kind: "box", x0: xIn(e), y0: e.clientY, moved: false, add: e.ctrlKey || e.metaKey || e.shiftKey, base: new Set(S.sel) };
@@ -398,14 +410,16 @@ function onLaneDown(e) {
   const move = (ev) => {
     const d = T.drag; if (!d) return;
     const x = xIn(ev), dx = x - d.x0;
+    if (d.frozen) return;                                      // older steps: click to look, no moving
     if (!d.moved && Math.abs(dx) < 4 && (d.kind !== "box" || Math.abs(ev.clientY - d.y0) < 4)) return;
     d.moved = true;
     if (d.kind === "trim") {
-      const ds = dx / S.pps * d.p.speed, D = S.info.duration;
-      if (d.edge === "l") d.p.start = +clamp(d.start + ds, 0, d.end - MIN_PIECE).toFixed(3);
-      else d.p.end = +clamp(d.end + ds, d.start + MIN_PIECE, D).toFixed(3);
+      const ds = dx / S.pps * d.p.speed;
+      let stop = false;
+      if (d.edge === "l") { const want = d.start + ds; d.p.start = +clamp(want, d.lim.lo, d.end - MIN_PIECE).toFixed(3); stop = want < d.lim.lo - 0.01; }
+      else { const want = d.end + ds; d.p.end = +clamp(want, d.start + MIN_PIECE, d.lim.hi).toFixed(3); stop = want > d.lim.hi + 0.01; }
       renderTimeline(); renderLengths();
-      showTip((d.edge === "l" ? "Starts at " + fmtTime(d.p.start, 2) : "Ends at " + fmtTime(d.p.end, 2)) + " · piece " + fmtTime(outLen(d.p), 2) + " · video " + fmtTime(finalTotal()), ev.clientX, ev.clientY);
+      showTip((d.edge === "l" ? "Starts at " + fmtTime(d.p.start, 2) : "Ends at " + fmtTime(d.p.end, 2)) + " · piece " + fmtTime(outLen(d.p), 2) + " · video " + fmtTime(finalTotal()) + (stop ? " · stops at the next piece" : ""), ev.clientX, ev.clientY);
     } else if (d.kind === "move") {
       const L = layout().filter((r) => !S.sel.has(r.p));
       let gap = L.length;
@@ -427,7 +441,7 @@ function onLaneDown(e) {
       const t0 = timeAt(a), t1 = timeAt(b);
       S.sel = new Set(d.base);
       for (const r of layout()) if (r.out1 > t0 && r.out0 < t1) S.sel.add(r.p);
-      for (const bl of $("laneV").querySelectorAll(".clipb")) bl.classList.toggle("sel", S.sel.has(S.proj.pieces[+bl.dataset.k]));
+      for (const bl of $("laneV").querySelectorAll(".clipb")) bl.classList.toggle("sel", S.sel.has(cur()[+bl.dataset.k]));
       renderLengths();
     }
   };
@@ -436,9 +450,9 @@ function onLaneDown(e) {
     hideTip(); const mark = $("dropMark"); if (mark) mark.remove(); const m = $("marquee"); if (m) m.remove();
     const d = T.drag; T.drag = null; if (!d) return;
     if (d.kind === "trim") {
-      if (d.moved) { S.undo.push(d.snap); S.redo = []; refreshAll(); scheduleSave(); }
+      if (d.moved) { S.undo.push(d.snap); S.redo = []; markHand(); refreshAll(); scheduleSave(); }
     } else if (d.kind === "move") {
-      if (d.moved && d.gap !== undefined) moveSelected(d.gap);
+      if (d.moved && !d.frozen && d.gap !== undefined) moveSelected(d.gap);
       else {
         if (d.wasSel) { S.sel = new Set([d.p]); S.anchor = d.p; }
         const r = layout().find((q) => q.p === d.p);                   // a click on a piece also moves the playhead there
@@ -456,7 +470,7 @@ function moveSelected(gap) {
   change(() => {
     const K = kept(), moving = K.filter((p) => S.sel.has(p)), rest = K.filter((p) => !S.sel.has(p));
     const order = rest.slice(0, gap).concat(moving, rest.slice(gap));
-    S.proj.pieces = order.concat(S.proj.pieces.filter((p) => p.off));
+    S.proj.pieces = order.concat(S.proj.pieces.filter((p) => p.off)); markHand();
   });
 }
 function onRulerDown(e) {
@@ -471,8 +485,8 @@ function onRulerDown(e) {
 // ---- timeline actions
 function removeSelected() {
   const sel = selList(); if (!sel.length) return;
-  change(() => { for (const p of sel) p.off = true; S.sel.clear(); });
-  toast(sel.length + " piece" + (sel.length > 1 ? "s" : "") + " removed · video now " + fmtTime(finalTotal()));
+  if (change(() => { for (const p of sel) p.off = true; S.sel.clear(); markHand(); }))
+    toast(sel.length + " piece" + (sel.length > 1 ? "s" : "") + " removed · video now " + fmtTime(finalTotal()));
 }
 function duplicateSelected() {
   const sel = selList(); if (!sel.length) return;
@@ -480,10 +494,11 @@ function duplicateSelected() {
     const out = [];
     const copies = new Set();
     for (const p of S.proj.pieces) { out.push(p); if (S.sel.has(p)) { const c = clone(p); out.push(c); copies.add(c); } }
-    S.proj.pieces = out; S.sel = copies;
+    S.proj.pieces = out; S.sel = copies; markHand();
   });
 }
 function splitAtPlayhead() {
+  if (locked()) { lockedNote(); return; }
   const at = segAt(S.t); if (!at || at.end) return;
   const { s } = at, p = s.p;
   const cut = p.reverse ? p.end - (S.t - s.out0) * p.speed : p.start + (S.t - s.out0) * p.speed;
@@ -492,7 +507,7 @@ function splitAtPlayhead() {
     const a = clone(p), b = clone(p);
     if (p.reverse) { a.start = +cut.toFixed(4); b.end = +cut.toFixed(4); } else { a.end = +cut.toFixed(4); b.start = +cut.toFixed(4); }
     const i = S.proj.pieces.indexOf(p);
-    S.proj.pieces.splice(i, 1, a, b); S.sel = new Set([b]); S.anchor = b;
+    S.proj.pieces.splice(i, 1, a, b); S.sel = new Set([b]); S.anchor = b; markHand();
   });
 }
 function restorePiece(p) {
@@ -503,7 +518,7 @@ function restorePiece(p) {
     const K = arr.filter((q) => !q.off);
     const after = K.find((q) => q.start >= p.start);
     arr.splice(after ? arr.indexOf(after) : K.length ? arr.indexOf(K[K.length - 1]) + 1 : 0, 0, p);
-    S.proj.pieces = arr; S.sel = new Set([p]);
+    S.proj.pieces = arr; S.sel = new Set([p]); markHand();
   });
 }
 
@@ -516,16 +531,25 @@ function openPanel(name) {
   if (name === "text") renderTexts();
 }
 // --- Cut
-function cutInto(sec) {
+/** Step 1: the whole parent video cut into pieces of `sec` seconds. */
+function parentPieces(sec) {
   const d = S.info.duration;
-  if (!(sec >= MIN_PIECE)) { $("cutNote").textContent = "Write a length of at least 0.1 seconds, for example 2."; return; }
   const n = Math.ceil(d / sec - 1e-9);
-  if (n > 5000) { $("cutNote").textContent = "That makes " + n + " pieces; the most is 5,000. Choose longer pieces."; return; }
+  if (n > 5000) throw new Error("That makes " + n + " pieces; the most is 5,000. Choose longer pieces.");
   const edges = []; for (let k = 0; k < n; k++) edges.push(k * sec); edges.push(d);
   if (edges.length > 2 && edges[edges.length - 1] - edges[edges.length - 2] < 0.08) edges.splice(edges.length - 2, 1);
   const pieces = []; for (let k = 0; k + 1 < edges.length; k++) pieces.push(blankPiece(edges[k], edges[k + 1]));
-  change(() => { S.proj.pieces = pieces; S.sel.clear(); S.t = 0; });
-  $("cutNote").textContent = pieces.length + " pieces of " + sec + " s. Undo brings back the old cut.";
+  return pieces;
+}
+/** The pieces the newest step starts from: the whole video (step 1) or the pinned step before it, laid end to end. */
+function stepBase() { const st = S.proj.steps[S.proj.steps.length - 1]; return st ? st.pieces : null; }
+function cutInto(sec) {
+  if (!(sec >= MIN_PIECE)) { $("cutNote").textContent = "Write a length of at least 0.1 seconds, for example 2."; return; }
+  let pieces;
+  try { pieces = stepBase() ? Steps.recut(stepBase(), sec).map(fixPiece) : parentPieces(sec); }
+  catch (e) { $("cutNote").textContent = e.message; return; }
+  if (!change(() => { S.proj.pieces = pieces; S.proj.rule = { interval: sec, group: 1, picks: [], action: "", hand: false }; S.sel.clear(); S.t = 0; })) return;
+  $("cutNote").textContent = Steps.countUnits(pieces) + " pieces of " + sec + " s" + (stepBase() ? ", cut from step " + S.proj.steps.length + "." : ".") + " Undo brings back the old cut.";
   fitZoom();
 }
 // --- Pattern
@@ -545,26 +569,118 @@ function renderPattern() {
     onclick: () => { if (P.picks.has(k)) P.picks.delete(k); else P.picks.add(k); renderPattern(); } }));
   const prev = $("patPreview"); prev.replaceChildren();
   for (let k = 0; k < Math.min(18, P.group * 3); k++) { const on = P.picks.has((k % P.group) + 1); prev.append(el("i", { class: (on ? "on" : "") + (k % P.group === 0 && k ? " gap" : "") })); }
-  const K = kept(), hits = K.filter((p, i) => P.picks.has((i % P.group) + 1));
-  const left = K.filter((p, i) => !P.picks.has((i % P.group) + 1));
+  const K = kept(), hits = patternHits(), hs = new Set(hits);
+  const left = K.filter((p) => !hs.has(p));
   const L = (arr) => fmtTime(arr.reduce((a, p) => a + outLen(p), 0));
-  $("patNote").textContent = P.picks.size ? hits.length + " of " + K.length + " pieces match. Removing them leaves " + L(left) + "; keeping only them leaves " + L(hits) + "." : "Tap at least one number.";
+  $("patNote").textContent = P.picks.size ? Steps.countUnits(hits) + " of " + Steps.countUnits(K) + " pieces match. Removing them leaves " + L(left) + "; keeping only them leaves " + L(hits) + "." : "Tap at least one number.";
   renderRecipes();
 }
-function patternHits() { return kept().filter((p, i) => P.picks.has((i % P.group) + 1)); }
+function patternHits() { return Steps.patternHits(kept(), P.group, [...P.picks]); }
+function setRule(action) {
+  S.proj.rule = Object.assign({ interval: 0, hand: false }, S.proj.rule || {}, { group: P.group, picks: [...P.picks].sort((a, b) => a - b), action });
+}
+// --- Steps: stack patterns on the same parent video, nothing rendered in between
+function renderSteps() {
+  if (!S.proj) return;
+  const steps = S.proj.steps, n = steps.length, viewing = S.viewStep === null ? n : S.viewStep;
+  for (const box of document.querySelectorAll("[data-steps]")) {
+    box.replaceChildren();
+    // summary first: which step, its length, and the main action; the list is folded away
+    const head = el("div", { class: "steps-head" },
+      el("span", { class: "n", text: String(viewing + 1) }),
+      el("div", { class: "t" }, el("b", { text: "Step " + (viewing + 1) + (locked() ? " (locked)" : n ? " of " + (n + 1) : "") }),
+        el("small", { text: Steps.ruleText(S.viewStep === null ? S.proj.rule : steps[S.viewStep].rule) })),
+      el("b", { class: "num len", text: fmtTime(Steps.stepLength(cur())) }),
+      locked() ? btn("Edit last", { icon: "edit", cls: "sm", onclick: () => showStep(null) })
+        : btn("Pin", { icon: "pin", cls: "sm primary", title: "Pin and add step: lock this result (with your hand edits) and start the next step from it. Nothing is rendered.", onclick: pinStep }));
+    box.append(head);
+    if (!n) continue;
+    const list = el("div", { class: "steps-list" });
+    const row = (i, rule, pieces, isNew) => list.append(el("button", { type: "button", class: "step" + ((isNew ? S.viewStep === null : S.viewStep === i) ? " on" : ""),
+      title: isNew ? "The step you are editing" : "Look at this step (locked)", onclick: () => showStep(isNew ? null : i) },
+      el("span", { class: "n", text: String(i + 1) }), el("span", { class: "t", text: Steps.ruleText(rule) }), el("b", { class: "num", text: fmtTime(Steps.stepLength(pieces)) }), icon(isNew ? "edit" : "lock", "s")));
+    steps.forEach((st, i) => row(i, st.rule, st.pieces, false));
+    row(n, S.proj.rule, S.proj.pieces, true);
+    const det = el("details", { class: "steps-all", open: S.stepsOpen }, el("summary", {}, el("span", { text: "All steps (" + (n + 1) + ")" }), el("span", { class: "note", text: "same original video" }), icon("chev", "chev")),
+      list, el("div", { class: "btns" },
+        btn("Undo step", { icon: "undo", cls: "ghost sm", title: "Throw away the newest step and edit the one before again", onclick: undoStep }),
+        btn("Save steps", { icon: "bookmark", cls: "ghost sm", title: "Keep these steps to use on another video", onclick: saveSteps })));
+    det.addEventListener("toggle", () => { S.stepsOpen = det.open; });
+    box.append(det);
+  }
+}
+function showStep(i) {
+  if (S.viewStep === i) return;
+  pause(); S.viewStep = i; S.sel.clear(); S.t = 0;
+  refreshAll(); fitZoom(); if (S.panel === "pattern") renderPattern();
+}
+function pinStep() {
+  if (locked()) { showStep(null); return; }
+  if (!kept().length) { toast("The timeline is empty: put a piece back first.", true); return; }
+  const n = S.proj.steps.length + 1;
+  change(() => {
+    S.proj.steps.push({ pieces: clone(S.proj.pieces), rule: S.proj.rule || null, length: +Steps.stepLength(S.proj.pieces).toFixed(3) });
+    S.proj.pieces = clone(kept()).map((p) => { delete p.unit; return fixPiece(p); });
+    S.proj.rule = null; S.sel.clear(); S.t = 0;
+  });
+  fitZoom(); openPanel("cut");
+  $("cutNote").textContent = "Step " + n + " is pinned. Step " + (n + 1) + " starts from it: choose a piece length and press Cut, then use Pattern.";
+  toast("Step " + n + " pinned · step " + (n + 1) + " starts at " + fmtTime(finalTotal()));
+}
+async function undoStep() {
+  if (!S.proj.steps.length) return;
+  if (S.viewStep !== null) S.viewStep = null;
+  if (!(await askYes("Throw away step " + (S.proj.steps.length + 1) + " and edit step " + S.proj.steps.length + " again? (Ctrl+Z brings it back.)", "Undo step"))) return;
+  change(() => { const st = S.proj.steps.pop(); S.proj.pieces = st.pieces.map(fixPiece); S.proj.rule = st.rule; S.sel.clear(); S.t = 0; });
+  fitZoom();
+}
+async function saveSteps() {
+  const rules = S.proj.steps.map((st) => st.rule).concat([S.proj.rule]).filter((r) => r && (r.interval || r.action));
+  if (!rules.length) { toast("These steps have only hand edits, which cannot be repeated on another video.", true); return; }
+  const name = await askText("Name for these steps", "", "for example: 2 s, remove 1 of 3, then 1 s keep 1 of 2");
+  if (!name) return;
+  S.recipes.push({ name, type: "steps", steps: rules });
+  try { await storeRecipes(); toast("Saved '" + name + "'. Hand edits are not part of it."); } catch (e) { S.recipes.pop(); toast(errText(e), true); }
+}
+/** Repeat saved steps on this video, from the whole video: cut, pattern, pin, cut, pattern ... */
+async function useSteps(r) {
+  if (locked()) { lockedNote(); return; }
+  if (!(await askYes("Start this video's steps over with '" + r.name + "'? (Ctrl+Z brings back what you have now.)", "Use"))) return;
+  let pieces, steps = [], last = null;
+  try {
+    r.steps.forEach((rule, i) => {
+      if (i === 0) pieces = parentPieces(rule.interval || S.info.duration + 1);
+      else {
+        steps.push({ pieces, rule: last, length: +Steps.stepLength(pieces).toFixed(3) });
+        const base = clone(pieces.filter((p) => !p.off)).map((p) => { delete p.unit; return p; });
+        pieces = rule.interval ? Steps.recut(base, rule.interval) : base;
+      }
+      if (rule.action) {
+        const hits = new Set(Steps.patternHits(pieces.filter((p) => !p.off), rule.group, rule.picks));
+        for (const p of pieces.filter((q) => !q.off)) if (rule.action === "remove" ? hits.has(p) : !hits.has(p)) p.off = true;
+      }
+      last = Object.assign({}, rule, { hand: false });
+    });
+  } catch (e) { toast(e.message, true); return; }
+  change(() => { S.proj.steps = steps; S.proj.pieces = pieces.map(fixPiece); S.proj.rule = last; S.sel.clear(); S.t = 0; });
+  fitZoom(); toast("Used '" + r.name + "' · video now " + fmtTime(finalTotal()));
+}
+
 // --- saved patterns
 function renderRecipes() {
   const box = $("recipeList"); box.replaceChildren();
   if (!S.recipes.length) box.append(el("p", { class: "hint", text: "None saved yet." }));
   S.recipes.forEach((r, i) => box.append(el("div", { class: "item" },
-    el("div", { class: "t" }, el("b", { text: r.name }), el("small", { text: "Pieces " + r.picks.join(", ") + " of every " + r.group + (r.look ? " · with effects" : "") })),
+    el("div", { class: "t" }, el("b", { text: r.name }), el("small", { text: r.type === "steps" ? r.steps.length + " steps: " + r.steps.map(Steps.ruleText).join(" → ") : "Pieces " + r.picks.join(", ") + " of every " + r.group + (r.look ? " · with effects" : "") })),
     el("div", { class: "acts" }, btn("Use", { onclick: () => useRecipe(r) }), btn("", { icon: "trash", cls: "ghost", title: "Delete", onclick: async () => {
-      if (!confirm("Delete the saved pattern '" + r.name + "'?")) return;
+      if (!(await askYes("Delete the saved pattern '" + r.name + "'?", "Delete", true))) return;
       S.recipes.splice(i, 1); await storeRecipes();
     } })))));
 }
 async function storeRecipes() { S.recipes = (await api("/api/recipes", { method: "PUT", json: S.recipes })).recipes; renderRecipes(); }
 function useRecipe(r) {
+  if (r.type === "steps") { useSteps(r); return; }
+  if (locked()) { lockedNote(); return; }
   P.group = r.group; P.picks = new Set(r.picks); renderPattern();
   const hits = patternHits();
   if (r.look) change(() => { for (const p of hits) Object.assign(p, clone(r.look), { start: p.start, end: p.end, off: p.off }); S.sel = new Set(hits); });
@@ -587,10 +703,16 @@ function fillFileSelects() {
 }
 const BINDS = [["sOrig", "original_sound", "check"], ["sDuck", "duck", "check"], ["sLoud", "even_loudness", "check"], ["sMusicVol", "music_volume", "num"],
   ["sMusic", "music", "str"], ["sTrans", "transition", "str"], ["sTransS", "transition_s", "num"], ["sFadeIn", "fade_in", "num"], ["sFadeOut", "fade_out", "num"],
-  ["sCap", "captions", "str"], ["sCapStyle", "caption_style", "str"], ["sCapPos", "caption_position", "str"], ["sCapSize", "caption_size", "str"]];
+  ["sCap", "captions", "str"], ["sCapStyle", "caption_style", "str"], ["sCapPos", "caption_position", "str"], ["sCapSize", "caption_size", "str"],
+  ["sNoise", "noise", "str"], ["sVocals", "vocals", "str"], ["sBoost", "voice_boost", "check"], ["sComp", "compress", "check"], ["sBass", "bass", "num"], ["sTreble", "treble", "num"]];
+function soundLabels() {
+  const db = (v) => (v > 0 ? "+" : "") + Math.round(v) + " dB";
+  $("sBassV").textContent = db(+$("sBass").value); $("sTrebleV").textContent = db(+$("sTreble").value);
+}
 function fillSettings() {
   const st = S.proj.settings;
-  for (const [id, key, kind] of BINDS) { const n = $(id); if (kind === "check") n.checked = !!st[key]; else n.value = String(st[key]); if (n.classList.contains("rng")) paintRange(n); }
+  for (const [id, key, kind] of BINDS) { const n = $(id); if (kind === "check") n.checked = !!st[key]; else n.value = String(st[key] === undefined ? 0 : st[key]); if (n.classList.contains("rng")) paintRange(n); }
+  soundLabels();
   renderShape();
 }
 function bindSettings() {
@@ -598,21 +720,26 @@ function bindSettings() {
     const n = $(id);
     n.addEventListener("change", () => {
       const v = kind === "check" ? n.checked : kind === "num" ? parseFloat(n.value) : n.value;
+      soundLabels();
       change(() => { S.proj.settings[key] = v; }, { keepVideo: true });
       if (key === "music" || key === "music_volume") { if (S.playing) musicPlay(); }
       if (key === "original_sound") showFrame();
     });
   }
 }
-async function addFileThen(accept, progId, done) {
-  const f = await pickFile(accept); if (!f) return;
-  const bar = $(progId); bar.hidden = false;
-  try { const data = await uploadFile(f, (k) => { bar.firstChild.style.width = Math.round(k * 100) + "%"; }); await loadFiles(); done(data); }
-  catch (e) { toast(errText(e), true); }
+async function addFileThen(kind, progId, done) {
+  const bar = $(progId);
+  try {
+    const data = await chooseFile(kind, (k) => { bar.hidden = false; bar.firstChild.style.width = Math.round(k * 100) + "%"; });
+    if (!data) return;
+    await loadFiles(); done(data);
+  } catch (e) { toast(errText(e), true); }
   finally { bar.hidden = true; }
 }
 async function loadFiles() { S.files = (await api("/api/files")).files; fillFileSelects(); }
 async function beatCut() {
+  if (locked()) { lockedNote(); return; }
+  if (S.proj.steps.length) { $("beatNote").textContent = "Cutting on the beat works in step 1 (on the whole video). Undo the steps first, or cut by time here."; return; }
   const every = Math.round(parseFloat($("beatEvery").value)), music = S.proj.settings.music;
   if (!music) { $("beatNote").textContent = "Choose the music first, above."; return; }
   if (!(every >= 1)) { $("beatNote").textContent = "Write a whole number of beats, for example 4."; return; }
@@ -627,7 +754,7 @@ async function beatCut() {
   }
   edges.push(d);
   const pieces = []; for (let k = 0; k + 1 < edges.length; k++) pieces.push(blankPiece(edges[k], edges[k + 1]));
-  change(() => { S.proj.pieces = pieces; S.sel.clear(); S.t = 0; });
+  change(() => { S.proj.pieces = pieces; S.proj.rule = null; S.sel.clear(); S.t = 0; });
   fitZoom();
   $("beatNote").textContent = pieces.length + " pieces, one every " + every + " beats (about " + Math.round(b.tempo) + " beats a minute)." + (S.proj.settings.transition !== "none" ? " Use a straight cut between pieces to stay on the beat." : "");
 }
@@ -679,7 +806,7 @@ function renderTexts() {
 function sec(title, ic, open, ...kids) {
   return el("details", { class: "sec", open }, el("summary", {}, icon(ic), el("span", { text: title }), icon("chev", "chev")), el("div", { class: "pad" }, ...kids));
 }
-function onSel(fn) { change(() => selList().forEach(fn), { keepVideo: false }); }
+function onSel(fn) { change(() => { selList().forEach(fn); markHand(); }, { keepVideo: false }); }
 function renderInspector() {
   const R = $("right"), sel = selList();
   const open = new Set([...R.querySelectorAll("details[open] > summary span")].map((s) => s.textContent));
@@ -748,13 +875,13 @@ function trimFields(p) {
     n.addEventListener("change", () => { const v = parseTime(n.value); if (v === null) { n.value = fmtTime(val, 2); return; } change(() => set(v)); });
     return el("label", { class: "field" }, el("span", { text: label }), n);
   };
-  const D = S.info.duration;
+  const lim = () => Steps.extendLimits(S.proj.pieces, p, S.info.duration);
   return el("div", { class: "grid2" },
-    tin("Starts at", p.start, (v) => { p.start = +clamp(v, 0, p.end - MIN_PIECE).toFixed(3); }),
-    tin("Ends at", p.end, (v) => { p.end = +clamp(v, p.start + MIN_PIECE, D).toFixed(3); }));
+    tin("Starts at", p.start, (v) => { p.start = +clamp(v, lim().lo, p.end - MIN_PIECE).toFixed(3); markHand(); }),
+    tin("Ends at", p.end, (v) => { p.end = +clamp(v, p.start + MIN_PIECE, lim().hi).toFixed(3); markHand(); }));
 }
 function renderOverview(R) {
-  const K = kept(), off = S.proj.pieces.filter((p) => p.off);
+  const K = kept(), off = cur().filter((p) => p.off);
   R.append(el("div", { class: "side-h" }, el("h2", { text: "Your video" })));
   R.append(el("div", { class: "pad" },
     el("div", { class: "box" },
@@ -769,7 +896,7 @@ function renderOverview(R) {
     el("div", { class: "t" }, el("b", { class: "num", text: fmtTime(p.start) + " – " + fmtTime(p.end) }), el("small", { text: fmtTime(outLen(p)) + " long" })),
     btn("", { icon: "restore", cls: "ghost", title: "Put back", onclick: () => restorePiece(p) })));
   if (off.length > 200) list.append(el("p", { class: "hint", text: "…and " + (off.length - 200) + " more." }));
-  const all = btn("Put all back", { icon: "restore", onclick: () => change(() => { for (const p of off) p.off = false; S.proj.pieces.sort((a, b) => a.start - b.start); }) });
+  const all = btn("Put all back", { icon: "restore", onclick: () => change(() => { for (const p of off) p.off = false; S.proj.pieces.sort((a, b) => a.start - b.start); markHand(); }) });
   R.append(sec("Removed pieces (" + off.length + ")", "trash", false, off.length ? list : el("p", { class: "hint", text: "Nothing removed yet." }), off.length ? all : null));
   R.append(sec("Shortcuts", "info", false,
     ...[["Space", "Play / pause"], ["S", "Split at the playhead"], ["Delete", "Remove selected"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+D", "Duplicate"], ["Ctrl+A", "Select all"], ["← →", "One frame (Shift: one second)"], ["+ / −", "Zoom the timeline"]]
@@ -844,63 +971,40 @@ function exportDialog() {
   document.body.append(scrim, dlg);
 }
 
-// ================================================================== start screen (no project yet)
-async function showStart() {
-  document.body.classList.add("scroll");
-  $("start").hidden = false;
-  let len = 2;
-  $("startLen").append(segmented([[1, "1 s"], [2, "2 s"], [3, "3 s"], [5, "5 s"], [0, "Whole video"]], len, (v) => { len = v; }));
-  const files = (await api("/api/files")).files.filter((f) => !f.audio && !f.subtitles);
-  const box = $("startFiles");
-  if (!files.length) box.append(el("p", { class: "hint", text: "Nothing yet." }));
-  for (const f of files) box.append(el("div", { class: "item", onclick: () => openInEditor(f.id, len || 1e9) },
-    el("img", { class: "thumb", alt: "", src: thumbUrl(f.id, 1) }), el("div", { class: "t" }, el("b", { text: f.name }), el("small", { text: fmtSize(f.size) + " · " + f.where })), icon("chevr", "s")));
-  const add = async (file) => {
-    $("startProg").hidden = false;
-    try { const d = await uploadFile(file, (k) => { $("startProg").firstChild.style.width = Math.round(k * 100) + "%"; }); openInEditor(d.id, len || 1e9); }
-    catch (e) { $("startNote").textContent = errText(e); $("startProg").hidden = true; }
-  };
-  const drop = $("startDrop");
-  drop.addEventListener("click", async () => { const f = await pickFile("video/*,.mkv,.mov,.avi,.ts"); if (f) add(f); });
-  dropTarget(drop, add);
-  const { projects } = await api("/api/projects");
-  const pl = $("startProjects");
-  if (!projects.length) pl.append(el("p", { class: "hint", text: "No projects yet." }));
-  for (const p of projects) pl.append(projItem(p, () => showStart()));
-}
-function projItem(p, after) {
+// ================================================================== other projects (Media panel)
+function projItem(p) {
   return el("div", { class: "item", onclick: () => { location.href = "/edit?p=" + p.id; } },
-    icon("layers"), el("div", { class: "t" }, el("b", { text: p.name }), el("small", { text: p.pieces + " pieces · from " + p.source_name })),
-    btn("", { icon: "trash", cls: "ghost", title: "Delete project", onclick: async (e) => {
-      e.stopPropagation();
-      if (!confirm("Delete the project '" + p.name + "'? Exported videos are kept.")) return;
-      await api("/api/projects/" + p.id, { method: "DELETE" }); location.reload(); void after;
-    } }));
+    icon("layers"), el("div", { class: "t" }, el("b", { text: p.name }), el("small", { text: fmtTime(p.length, 0) + " · from " + p.source_name })), icon("chevr", "s"));
 }
 
 // ================================================================== open a project
 async function openProject() {
   let r;
   try { r = await api("/api/projects/" + S.id); }
-  catch (e) { toast(errText(e), true); S.id = ""; history.replaceState(null, "", "/edit"); showStart(); return; }
+  catch (e) { location.replace("/?msg=" + encodeURIComponent(errText(e))); return; }
   S.proj = r.project; S.info = r.info;
   S.proj.pieces.forEach(fixPiece); if (!Array.isArray(S.proj.texts)) S.proj.texts = [];
+  if (!Array.isArray(S.proj.steps)) S.proj.steps = [];
+  for (const st of S.proj.steps) st.pieces.forEach(fixPiece);
   $("suite").hidden = false;
   $("projName").value = S.proj.name;
   $("srcName").textContent = S.proj.source.split("/").pop();
   $("srcFacts").textContent = fmtTime(S.info.duration, 0) + (S.info.has_video ? " · " + S.info.width + "×" + S.info.height : " · sound only");
+  $("srcWhere").textContent = S.info.where ? "Used where it is (not copied): " + S.info.where : "A copy kept by the app.";
   if (S.info.has_video) $("srcThumb").src = thumbUrl(S.proj.source, 1);
-  document.title = S.proj.name + " · EditForge";
+  document.title = S.proj.name + " · " + APP_NAME;
   // the live viewer jumps around a lot, so it uses the light copy (fast to seek, plays everywhere)
   const ready = S.info.preview && S.info.preview.state === "ready";
   if (ready) setSource(mediaUrl(S.proj.source, true));
   else {
     if (S.info.plays_in_browser) setSource(mediaUrl(S.proj.source, false));
     banner("Preparing smooth playback…", 0);
+    const swap = (url) => { const t = S.t; V.src = ""; setSource(url); S.t = t; for (const v of [V.a, V.b]) v.addEventListener("loadeddata", () => showFrame(), { once: true }); };
+    let quick = false;
     ensurePreview(S.proj.source, S.info, (st) => {
-      if (st.state === "running") banner((S.info.plays_in_browser ? "Preparing smoother playback… " : "This file needs a light copy to play here (" + S.info.playback_note + "). Preparing… ") + Math.round(st.progress * 100) + "%", st.progress);
+      if (st.state === "running") banner((S.info.plays_in_browser || quick ? "Preparing smoother playback… " : "This file needs a light copy to play here (" + S.info.playback_note + "). Preparing… ") + Math.round(st.progress * 100) + "%", st.progress);
       if (st.state === "failed") banner("A light copy could not be made: " + st.error, 0);
-    }, true).then((ok) => { if (ok) { const t = S.t; V.src = ""; setSource(mediaUrl(S.proj.source, true)); S.t = t; for (const v of [V.a, V.b]) v.addEventListener("loadeddata", () => showFrame(), { once: true }); banner(null); } });
+    }, true, () => { if (!S.info.plays_in_browser) { quick = true; swap(mediaUrl(S.proj.source, "q")); } }).then((ok) => { if (ok) { const t = S.t; V.src = ""; setSource(mediaUrl(S.proj.source, true)); S.t = t; for (const v of [V.a, V.b]) v.addEventListener("loadeddata", () => showFrame(), { once: true }); banner(null); } });
   }
   bindSettings(); fillSettings();
   sizeFrame(); new ResizeObserver(() => { sizeFrame(); renderTimeline(); }).observe($("stage"));
@@ -908,8 +1012,9 @@ async function openProject() {
   refreshAll();
   loadFiles().catch(() => {});
   api("/api/recipes").then((x) => { S.recipes = x.recipes; renderRecipes(); }).catch(() => {});
-  api("/api/projects").then(({ projects }) => { const pl = $("projList"); for (const p of projects.filter((q) => q.id !== S.id)) pl.append(projItem(p)); if (!pl.children.length) pl.append(el("p", { class: "hint", text: "No other projects." })); }).catch(() => {});
+  api("/api/projects").then(({ projects }) => { const pl = $("projList"); for (const p of projects.filter((q) => q.id !== S.id && !q.trashed && !q.missing).slice(0, 30)) pl.append(projItem(p)); if (!pl.children.length) pl.append(el("p", { class: "hint", text: "No other projects." })); }).catch(() => {});
   openPanel(kept().length > 1 ? "pattern" : "cut");
+  renderSteps();
   $("saveState").textContent = "Saved";
 }
 function banner(text, k) {
@@ -924,19 +1029,20 @@ function wire() {
   // cut
   const chips = segmented([[1, "1 s"], [2, "2 s"], [3, "3 s"], [5, "5 s"], [10, "10 s"]], 2, (v) => { $("cutSec").value = String(v); });
   $("cutChips").append(chips);
-  $("cutBtn").addEventListener("click", () => {
+  $("cutBtn").addEventListener("click", async () => {
+    if (locked()) { lockedNote(); return; }
     const sec = parseFloat(String($("cutSec").value).replace(",", "."));
     const edited = S.proj.pieces.length > 1 && (S.proj.pieces.some((p) => p.off || p.speed !== 1 || p.fx.length) || S.undo.length);
-    if (edited && !confirm("Cutting again starts the pieces over. Undo brings back what you have now. Go on?")) return;
+    if (edited && !(await askYes("Cutting again starts the pieces of this step over. Undo brings back what you have now.", "Cut again"))) return;
     cutInto(sec);
   });
   // pattern
-  $("patRemove").addEventListener("click", () => { const h = patternHits(); if (!h.length) return; change(() => { for (const p of h) p.off = true; S.sel.clear(); }); renderPattern(); toast(h.length + " pieces removed · video now " + fmtTime(finalTotal())); });
-  $("patKeep").addEventListener("click", () => { const h = new Set(patternHits()); if (!h.size) return; const gone = kept().filter((p) => !h.has(p)); change(() => { for (const p of gone) p.off = true; S.sel.clear(); }); renderPattern(); toast(gone.length + " pieces removed · video now " + fmtTime(finalTotal())); });
+  $("patRemove").addEventListener("click", () => { const h = patternHits(); if (!h.length) return; if (!change(() => { for (const p of h) p.off = true; S.sel.clear(); setRule("remove"); })) return; renderPattern(); toast(Steps.countUnits(h) + " pieces removed · video now " + fmtTime(finalTotal())); });
+  $("patKeep").addEventListener("click", () => { const h = new Set(patternHits()); if (!h.size) return; const gone = kept().filter((p) => !h.has(p)); if (!change(() => { for (const p of gone) p.off = true; S.sel.clear(); setRule("keep"); })) return; renderPattern(); toast(Steps.countUnits(gone) + " pieces removed · video now " + fmtTime(finalTotal())); });
   $("patSelect").addEventListener("click", () => { S.sel = new Set(patternHits()); refreshAll({ keepVideo: true }); });
   $("recipeSave").addEventListener("click", async () => {
-    const name = prompt("Name for this pattern, for example: remove 1st of every 3");
-    if (!name || !name.trim()) return;
+    const name = await askText("Name for this pattern", "", "for example: remove 1st of every 3");
+    if (!name) return;
     const first = selList()[0];
     let look = null;
     if (first) { look = clone(first); delete look.start; delete look.end; delete look.off; if (look.follow.mode === "object") look.follow = { mode: "none", zoom: look.follow.zoom, path: [] }; }
@@ -944,12 +1050,13 @@ function wire() {
     try { await storeRecipes(); toast("Saved '" + name.trim() + "'"); } catch (e) { S.recipes.pop(); toast(errText(e), true); }
   });
   // audio, text, format
-  $("musicAdd").addEventListener("click", () => addFileThen("audio/*,.mp3,.wav,.m4a,.flac,.ogg", "musicProg", (d) => {
+  $("musicAdd").addEventListener("click", () => addFileThen("audio", "musicProg", (d) => {
     if (d.has_video) { toast("That is a video. Choose a music file such as an MP3.", true); return; }
     change(() => { S.proj.settings.music = d.id; }, { keepVideo: true }); fillFileSelects();
   }));
   $("beatBtn").addEventListener("click", beatCut);
-  $("capAdd").addEventListener("click", () => addFileThen(".srt,.vtt", "musicProg", (d) => {
+  for (const id of ["sBass", "sTreble"]) $(id).addEventListener("input", soundLabels);
+  $("capAdd").addEventListener("click", () => addFileThen("subtitles", "musicProg", (d) => {
     if (!d.subtitles) { toast("That is not a subtitle file (.srt or .vtt).", true); return; }
     change(() => { S.proj.settings.captions = d.id; }, { keepVideo: true }); fillFileSelects(); $("capNote").textContent = d.words + " words found.";
   }));
@@ -1006,13 +1113,19 @@ function wire() {
     else if (k === "Home") seek(0); else if (k === "End") seek(rawTotal());
     else if (k === "+" || k === "=") zoomTo(S.pps * 1.5); else if (k === "-") zoomTo(S.pps / 1.5);
   });
-  window.addEventListener("beforeunload", () => { if (S.saveTimer) saveNow(); });
+  // Leaving the page within half a second of a change: send the save in a way that survives closing the page.
+  window.addEventListener("pagehide", () => {
+    if (!S.saveTimer) return;
+    clearTimeout(S.saveTimer); S.saveTimer = null;
+    const body = JSON.stringify({ name: S.proj.name, pieces: S.proj.pieces, settings: S.proj.settings, texts: S.proj.texts, steps: S.proj.steps, rule: S.proj.rule });
+    try { fetch("/api/projects/" + S.id, { method: "PUT", keepalive: body.length < 60000, headers: { "X-EditForge-Token": TOKEN, "Content-Type": "application/json" }, body }); } catch (e) { /* closing */ }
+  });
 }
 
 (async function init() {
   topBar("/edit", [el("div", { class: "lenpill", title: "Length of the finished video" }, icon("clock", "s"), el("span", { text: "Video" }), el("b", { id: "topLen", text: "0:00.0" })),
     btn("Export", { icon: "export", cls: "primary", onclick: () => exportDialog() })]);
   paintIcons(); enhanceAll();
-  if (!S.id) { for (const n of document.querySelectorAll(".top .lenpill, .top .btn.primary")) n.hidden = true; await showStart(); return; }
+  if (!S.id) { location.replace("/"); return; }
   wire(); await openProject();
 })();
