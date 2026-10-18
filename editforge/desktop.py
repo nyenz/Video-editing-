@@ -202,6 +202,9 @@ def run() -> int:
         _close_window(proc)
 
     state.quit_app = quit_app
+    if proc is not None:                       # own taskbar button and icon, not grouped under Edge
+        from . import taskbar
+        taskbar.watch(str(_profile_dir()), log, quitting)
     try:
         if proc is None:
             _fallback_window(url)
@@ -323,6 +326,9 @@ def selftest() -> int:
     if ff:
         out = subprocess.run([ff, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=60).stdout
         say("libx264" in out, "FFmpeg can make H.264 video")
+    from . import taskbar
+    if os.name == "nt":
+        say(taskbar.supported(), "own taskbar icon (pywin32)")
     t = time.perf_counter()
     try:
         import cv2  # noqa: F401
