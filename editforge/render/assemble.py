@@ -52,6 +52,10 @@ def audio_graph(tl: Timeline, sr: int, layout: str, speech: str, music_idx: List
         parts = ["highpass=f=80"] if a.denoise.get("highpass") else []
         parts.append(f"afftdn=nr={a.denoise['amount']:g}:nf={denoise_nf:.1f}:tn=1")
         cur = g.add(cur, ",".join(parts), "dn")
+    if a.voice:
+        chain = voice_chain(a.voice)
+        if chain:
+            cur = g.add(cur, chain, "vc")
     tracks: List[Tuple[MusicSpec, str]] = []
     for m, idx in zip(a.music, music_idx):
         chain = music_chain(m, total_s, sr, layout)
@@ -83,7 +87,7 @@ def audio_graph(tl: Timeline, sr: int, layout: str, speech: str, music_idx: List
             cur = g.add(cur, f"volume={len(mix_in)}", "mv")
     if loudnorm:
         cur = g.add(cur, loudnorm, "ln")
-    if guard and (loudnorm or tracks):
+    if guard and (loudnorm or tracks or a.voice):
         cur = g.add(cur, LIMITER, "lm")
     if fades and a.fade_audio:
         if a.fade_in > 0:
@@ -92,6 +96,25 @@ def audio_graph(tl: Timeline, sr: int, layout: str, speech: str, music_idx: List
             cur = g.add(cur, f"afade=t=out:st={max(0.0, total_s - a.fade_out):.4f}:d={a.fade_out:.4f}", "fo")
     cur = g.add(cur, f"aformat=sample_fmts=fltp:sample_rates={sr}:channel_layouts={layout}", "fz")
     return g.text(), cur, warnings
+
+
+def voice_chain(v: Dict[str, Any]) -> str:
+    """FFmpeg filters for the sound clean-up (see AudioSpec.voice). Empty when nothing is switched on."""
+    parts: List[str] = []
+    if v.get("vocals") == "remove":           # voices are usually in the middle: cancel what both sides share (needs stereo)
+        parts += ["pan=stereo|c0=c0-c1|c1=c1-c0", "volume=1.4"]
+    elif v.get("vocals") == "voice":          # keep the voice band of the middle, drop rumble and hiss
+        parts += ["pan=mono|c0=0.5*c0+0.5*c1", "highpass=f=120", "lowpass=f=7500"]
+    if v.get("boost"):                         # clearer voices: lift the presence band, cut mud
+        parts += ["highpass=f=70", "equalizer=f=300:t=q:w=1:g=-2", "equalizer=f=3000:t=q:w=1.2:g=5"]
+    bass, treble = float(v.get("bass") or 0), float(v.get("treble") or 0)
+    if abs(bass) >= 0.5:
+        parts.append(f"bass=g={bass:g}:f=100")
+    if abs(treble) >= 0.5:
+        parts.append(f"treble=g={treble:g}:f=6000")
+    if v.get("compress"):                      # sound balancing: quiet parts up, loud parts down
+        parts.append("acompressor=threshold=0.08:ratio=3:attack=15:release=250:makeup=2.5")
+    return ",".join(parts)
 
 
 def loudnorm_filter(target: Dict[str, float], measured: Optional[Dict[str, float]] = None) -> str:

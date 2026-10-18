@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any
+import threading
+from typing import Any, Dict, Tuple
 
 _BLOCK = 64 * 1024
 _SAMPLES = 24
+_MEMO: Dict[Tuple[str, int, int], str] = {}
+_MEMO_LOCK = threading.Lock()
 
 
 def file_fingerprint(path: str) -> str:
@@ -16,7 +19,24 @@ def file_fingerprint(path: str) -> str:
 
     It hashes the size plus 24 evenly spaced 64 KiB blocks. That is fast even for a
     4-hour file, and changes whenever the content is replaced (not just the name).
+    The answer is remembered for as long as the file keeps its size and time, so asking
+    again (every thumbnail, every preview check) costs no disk reads.
     """
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_size, st.st_mtime_ns)
+    with _MEMO_LOCK:
+        hit = _MEMO.get(key)
+    if hit is not None:
+        return hit
+    hit = _fingerprint(path)
+    with _MEMO_LOCK:
+        if len(_MEMO) > 5000:
+            _MEMO.clear()
+        _MEMO[key] = hit
+    return hit
+
+
+def _fingerprint(path: str) -> str:
     size = os.path.getsize(path)
     h = hashlib.sha256()
     h.update(str(size).encode())

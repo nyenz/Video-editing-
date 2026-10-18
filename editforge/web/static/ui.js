@@ -67,6 +67,15 @@ const ICONS = {
   down: "M12 5v14M19 12l-7 7-7-7",
   restore: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.7 2.7L3 8M3 3v5h5",
   magnet: "M6 3v8a6 6 0 0 0 12 0V3M6 7h4M14 7h4",
+  home: "M3 11 12 3l9 8M5 9.5V21h5v-6h4v6h5V9.5",
+  search: "M11 11m-7 0a7 7 0 1 0 14 0a7 7 0 1 0-14 0M21 21l-4.3-4.3",
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
+  edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  disk: "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3zM4 6c0 1.7 3.6 3 8 3s8-1.3 8-3M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
+  link: "M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1",
+  pin: "M12 17v5M9 3h6l-1 6 4 4H6l4-4z",
+  lock: "M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4",
 };
 /** An <svg> icon element. */
 function icon(name, cls) {
@@ -114,9 +123,12 @@ async function api(path, opts = {}) {
   return data;
 }
 function errText(e) { return e.message + (e.fix ? " " + e.fix : ""); }
-function mediaUrl(id, preview) { return "/media?id=" + encodeURIComponent(id) + (preview ? "&preview=1" : "") + "&t=" + encodeURIComponent(TOKEN); }
-function thumbUrl(id, at) { return "/thumb?id=" + encodeURIComponent(id) + "&at=" + Math.max(0, at).toFixed(2) + "&t=" + encodeURIComponent(TOKEN); }
+/** preview: false = the original, true = the 480p light copy, "q" = the quick copy (picture as it is, sound made playable). */
+function mediaUrl(id, preview) { return "/media?id=" + encodeURIComponent(id) + (preview ? "&preview=" + (preview === "q" ? "q" : "1") : "") + "&t=" + encodeURIComponent(TOKEN); }
+function thumbUrl(id, at, big) { return "/thumb?id=" + encodeURIComponent(id) + "&at=" + Math.max(0, at).toFixed(2) + (big ? "&h=240" : "") + "&t=" + encodeURIComponent(TOKEN); }
 function fmtSize(b) { return b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : (b / 1e6).toFixed(1) + " MB"; }
+/** CapCut-style short size: 320.8M, 1.4G, 553.8K. */
+function fmtShort(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + "G" : b >= 1e6 ? (b / 1e6).toFixed(1) + "M" : (b / 1e3).toFixed(1) + "K"; }
 /** 3725.5 -> "1:02:05.5" (tenths) ; digits=0 -> "1:02:05"; digits=3 -> milliseconds. */
 function fmtTime(s, digits) {
   if (s === null || s === undefined || !isFinite(s)) return "-";
@@ -150,21 +162,114 @@ function toast(text, bad) {
 }
 
 // ------------------------------------------------------------------ top bar (same on every page)
+const APP_NAME = "Nyenz Edit";
+const PAGES = [["/", "Home", "home"], ["/clips", "Clips", "scissors"], ["/edit", "Editor", "layers"], ["/combine", "Combine", "combine"], ["/advanced", "Advanced", "code"]];
 function topBar(active, extra) {
-  const pages = [["/", "Clips", "scissors"], ["/edit", "Editor", "layers"], ["/combine", "Combine", "combine"], ["/advanced", "Advanced", "code"]];
   const nav = el("nav", { class: "nav", "aria-label": "Pages" });
-  for (const [href, name, ic] of pages) nav.append(el("a", { href, class: active === href ? "on" : "" }, icon(ic, "s"), el("span", { text: name })));
+  for (const [href, name, ic] of PAGES.slice(1)) nav.append(el("a", { href, class: active === href ? "on" : "" }, icon(ic, "s"), el("span", { text: name })));
   const bar = el("header", { class: "top" },
-    el("a", { class: "brand", href: "/" }, el("img", { src: "/static/logo.svg", alt: "" }), el("span", { text: "EditForge" })),
-    nav, el("div", { class: "grow" }));
+    el("a", { class: "brand", href: "/", title: "Home" }, el("img", { src: "/static/logo.svg", alt: "" }), el("span", { text: APP_NAME })),
+    nav, el("div", { class: "grow" }), Update.pill());
   for (const x of extra || []) bar.append(x);
-  const ex = btn("Exports", { icon: "download", cls: "ghost", onclick: () => Exports.show() });
-  ex.append(el("span", { class: "count", id: "exportsCount", hidden: true }));
-  bar.append(ex);
+  bar.append(exportsButton());
   Exports.start();
   document.body.prepend(bar);
   return bar;
 }
+function exportsButton() {
+  const ex = btn("Exports", { icon: "download", cls: "ghost", onclick: () => Exports.show() });
+  ex.append(el("span", { class: "count", id: "exportsCount", hidden: true }));
+  return ex;
+}
+
+// ------------------------------------------------------------------ small dialogs (instead of the browser's own boxes)
+function dialogBox(title, body, buttons) {
+  return new Promise((resolve) => {
+    const prev = document.activeElement;
+    const done = (v) => { scrim.remove(); dlg.remove(); document.removeEventListener("keydown", key, true); if (prev && prev.focus) prev.focus(); resolve(v); };
+    const scrim = el("div", { class: "scrim", onclick: () => done(null) });
+    const row = el("div", { class: "btns end" });
+    for (const [label, value, cls] of buttons) row.append(btn(label, { cls, onclick: () => done(typeof value === "function" ? value() : value) }));
+    const dlg = el("div", { class: "dialog small", role: "dialog", "aria-label": title },
+      el("div", { class: "side-h" }, el("h2", { text: title }), btn("", { icon: "x", cls: "ghost", title: "Close", onclick: () => done(null) })),
+      el("div", { class: "pad" }, ...body, row));
+    const key = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); done(null); }
+      if (e.key === "Enter" && e.target.tagName !== "BUTTON") { e.preventDefault(); const last = buttons[buttons.length - 1]; done(typeof last[1] === "function" ? last[1]() : last[1]); }
+    };
+    document.addEventListener("keydown", key, true);
+    document.body.append(scrim, dlg);
+    const f = dlg.querySelector("input") || row.lastChild; if (f) { f.focus(); if (f.select) f.select(); }
+  });
+}
+/** Yes / no question. Resolves true or false. */
+async function askYes(text, yes, danger) {
+  return (await dialogBox("Are you sure?", [el("p", { class: "msg", text })], [["Cancel", false, "ghost"], [yes || "Yes", true, danger ? "danger-fill" : "primary"]])) === true;
+}
+/** Ask for a short text. Resolves the text, or null. */
+async function askText(title, value, placeholder) {
+  const inp = el("input", { class: "input", value: value || "", placeholder: placeholder || "", maxlength: "80", "aria-label": title });
+  const v = await dialogBox(title, [inp], [["Cancel", null, "ghost"], ["OK", () => inp.value.trim() || null, "primary"]]);
+  return v || null;
+}
+
+// ------------------------------------------------------------------ choosing files: linked where they are, no copy
+/**
+ * Opens the computer's own file window. The file is used where it is (nothing is copied).
+ * Where there is no such window, the browser's chooser sends a copy instead (`onprog` shows that).
+ * Resolves with the file facts (id, name, size, duration ...), or null when cancelled.
+ */
+async function chooseFile(kind, onprog, accept) {
+  const r = await api("/api/choose", { method: "POST", json: { kind } });
+  if (r.cancelled) return null;
+  if (!r.no_dialog) { toast("Linked, not copied: " + r.where); return r; }
+  const f = await pickFile(accept || { video: "video/*,.mkv,.mov,.avi,.ts", audio: "audio/*,.mp3,.wav,.m4a,.flac,.ogg", subtitles: ".srt,.vtt" }[kind] || "");
+  if (!f) return null;
+  return uploadFile(f, onprog);
+}
+
+// ------------------------------------------------------------------ updates: a quiet button when a new version is out
+const Update = {
+  node: null, st: null,
+  pill() {
+    this.label = el("span", { text: "Update" });
+    this.node = el("button", { type: "button", class: "update-pill", title: "A new version is ready", onclick: () => this.dialog() }, icon("up", "s"), this.label);
+    this.node.hidden = true;
+    setTimeout(() => this.refresh(), 1500);              // never slows the first screen
+    return this.node;
+  },
+  async refresh() {
+    try { this.st = await api("/api/update"); } catch (e) { return; }
+    if (!this.node) return;
+    this.node.hidden = !this.st.available;
+    this.label.textContent = "Update available: " + this.st.latest;
+  },
+  async dialog() {
+    const st = this.st; if (!st) return;
+    const bar = el("div", { class: "prog" }, el("i")), note = el("p", { class: "hint" });
+    const body = [el("p", { class: "msg", text: "Version " + st.latest + " is ready (you have " + st.current + ")." + (st.size ? " Download: " + fmtSize(st.size) + "." : "") }),
+      el("p", { class: "hint", text: st.can_install ? "It downloads, waits until no video is being made, then the app closes, updates and opens again by itself. Your projects and videos stay." : "Updates install themselves only in the installed Windows app. Download the new installer from the release page." }), bar, note];
+    bar.hidden = true;
+    let timer = null;
+    const watch = async () => {
+      let s; try { s = await api("/api/update"); } catch (e) { note.textContent = "Closing for the update…"; return; }
+      const j = s.job; bar.hidden = j.state === "idle";
+      bar.firstChild.style.width = Math.round((j.progress || 0) * 100) + "%";
+      note.textContent = { downloading: "Downloading… " + Math.round((j.progress || 0) * 100) + "%", ready: "Downloaded and checked.", waiting: "Waiting for your export to finish, then updating…", installing: "Updating: the app closes and opens again by itself…", failed: j.error }[j.state] || "";
+      if (j.state === "ready") { clearInterval(timer); await api("/api/update/install", { method: "POST", json: {} }).catch((e) => { note.textContent = errText(e); }); timer = setInterval(watch, 1000); }
+    };
+    const choice = await dialogBox("Update available", body, [["Skip this version", "skip", "ghost"], ["Later", null, "ghost"], [st.can_install ? "Update now" : "OK", "go", "primary"]]);
+    if (choice === "skip") { await api("/api/update/skip", { method: "POST", json: { version: st.latest } }); this.refresh(); return; }
+    if (choice !== "go" || !st.can_install) return;
+    // keep a small progress window open while it downloads and installs
+    const box = el("div", { class: "dialog small", role: "dialog", "aria-label": "Updating" },
+      el("div", { class: "side-h" }, el("h2", { text: "Updating to " + st.latest })), el("div", { class: "pad" }, bar, note));
+    document.body.append(el("div", { class: "scrim" }), box);
+    bar.hidden = false;
+    try { await api("/api/update/download", { method: "POST", json: {} }); } catch (e) { note.textContent = errText(e); return; }
+    timer = setInterval(watch, 700);
+  },
+};
 
 // ------------------------------------------------------------------ custom dropdown on top of a hidden <select>
 const Selects = [];
@@ -281,7 +386,7 @@ function dropTarget(node, onfile) {
  * sound or not at all. Then a light 480p copy with normal sound is made, only for watching.
  * Finished videos are always made from the original. onstate({state, progress, error}).
  */
-async function ensurePreview(fileId, info, onstate, always) {
+async function ensurePreview(fileId, info, onstate, always, onquick) {
   if (!info.has_video) return false;
   if (info.preview && info.preview.state === "ready") { onstate({ state: "ready", progress: 1 }); return true; }
   if (!always && info.plays_in_browser) return false;
@@ -292,6 +397,7 @@ async function ensurePreview(fileId, info, onstate, always) {
       let st;
       try { st = await api("/api/preview?id=" + encodeURIComponent(fileId)); } catch (e) { setTimeout(tick, 1500); return; }
       onstate(st);
+      if (st.quick && onquick) { onquick(); onquick = null; }          // the quick copy plays already (picture as it is, sound fixed)
       if (st.state === "ready") resolve(true); else if (st.state === "failed") resolve(false); else setTimeout(tick, 1000);
     };
     tick();
@@ -301,10 +407,12 @@ async function ensurePreview(fileId, info, onstate, always) {
 // ------------------------------------------------------------------ exports drawer (finished videos and progress)
 const Exports = {
   visible: false, openIds: new Set(), sig: "", timer: null, onFiles: null,
+  busy: false,
   async refresh(force) {
     let data;
     try { data = await api("/api/jobs"); } catch (e) { return; }
     const running = data.jobs.filter((j) => j.status === "running" || j.status === "queued").length;
+    this.busy = running > 0;
     const pill = $("exportsCount");
     if (pill) { pill.textContent = running ? String(running) : ""; pill.hidden = !running; }
     if (!this.visible) return;
@@ -336,11 +444,11 @@ const Exports = {
       acts.append(el("a", { class: "btn", href: "/download/" + j.id + "?t=" + encodeURIComponent(TOKEN) }, icon("download", "s"), el("span", { text: "Save" })));
       if (!j.preview) {
         acts.append(btn("Edit", { icon: "layers", title: "Open this video in the Editor", onclick: () => openInEditor(j.file_id) }));
-        acts.append(el("a", { class: "btn ghost", href: "/?open=" + encodeURIComponent(j.file_id), title: "Cut clips from this video" }, icon("scissors", "s")));
+        acts.append(el("a", { class: "btn ghost", href: "/clips?open=" + encodeURIComponent(j.file_id), title: "Cut clips from this video" }, icon("scissors", "s")));
       }
     }
     if (["done", "failed", "cancelled", "interrupted"].includes(j.status)) acts.append(btn("", { icon: "trash", cls: "ghost danger", title: "Remove", onclick: async () => {
-      if (!window.confirm("Remove '" + name + "'? The file is deleted from EditForge (copies you saved are kept).")) return;
+      if (!(await askYes("Remove '" + name + "'? The file is deleted from the app (copies you saved are kept).", "Remove", true))) return;
       this.openIds.delete(j.id); await api("/api/jobs/" + j.id, { method: "DELETE" }); if (this.onFiles) this.onFiles(); this.refresh(true);
     } }));
     node.append(acts);
@@ -359,7 +467,13 @@ const Exports = {
     document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); } });
     this.refresh(true);
   },
-  start() { if (!this.timer) { this.refresh(); this.timer = setInterval(() => this.refresh(), 1000); } },
+  // Every second while a video is being made or the panel is open; otherwise every 5 seconds (less work for the app).
+  start() {
+    if (this.timer) return;
+    let n = 0;
+    this.refresh();
+    this.timer = setInterval(() => { n++; if (this.busy || this.visible || n % 5 === 0 || document.hasFocus() && n % 3 === 0) this.refresh(); }, 1000);
+  },
 };
 /** A small custom video player: picture, play, a seek bar, time, sound and full screen. */
 function miniPlayer(url) {

@@ -4,40 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="ef-token" content="{{TOKEN}}">
-<title>Editor · EditForge</title>
+<title>Editor · Nyenz Edit</title>
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/ui.css">
 </head>
 <body>
-
-<!-- No project open: choose a video -->
-<div id="start" class="page" hidden>
-  <section class="card">
-    <h2><i data-ic="layers"></i>Start editing a video</h2>
-    <div class="grid2">
-      <div class="field">
-        <div id="startDrop" class="drop" tabindex="0" role="button" aria-label="Add a video">
-          <i data-ic="upload"></i><b>Drop a video here</b><span class="hint">or click to choose a file</span>
-        </div>
-        <div id="startProg" class="prog" hidden><i></i></div>
-        <span id="startNote" class="note" aria-live="polite"></span>
-      </div>
-      <div class="field">
-        <span>Or pick a video you added before</span>
-        <div id="startFiles" class="list"></div>
-      </div>
-    </div>
-    <div class="row wrap">
-      <span class="lbl">Cut it into pieces of</span>
-      <div id="startLen"></div>
-      <span class="hint">You can change this later.</span>
-    </div>
-  </section>
-  <section class="card">
-    <h2><i data-ic="folder"></i>Your projects</h2>
-    <div id="startProjects" class="list"></div>
-  </section>
-</div>
 
 <!-- The editing suite -->
 <div id="suite" class="suite" hidden>
@@ -47,7 +18,8 @@
     <button data-panel="pattern" title="Keep or remove by a pattern"><i data-ic="pattern"></i>Pattern</button>
     <hr>
     <span class="later">Finish</span>
-    <button data-panel="audio" title="Music and sound"><i data-ic="music"></i>Audio</button>
+    <button data-panel="audio" title="Music"><i data-ic="music"></i>Audio</button>
+    <button data-panel="sound" title="Clean up the sound: noise, voices, balance"><i data-ic="sliders"></i>Sound</button>
     <button data-panel="format" title="Shape and transitions"><i data-ic="ratio"></i>Format</button>
     <button data-panel="text" title="Words and captions"><i data-ic="type"></i>Text</button>
   </nav>
@@ -60,8 +32,9 @@
         <label class="field"><span>Project name</span><input id="projName" class="input" maxlength="80"></label>
         <div class="box">
           <div class="row"><img id="srcThumb" class="thumb" alt=""><div class="t"><b id="srcName" class="ellip"></b><div id="srcFacts" class="note"></div></div></div>
+          <p id="srcWhere" class="hint where"></p>
         </div>
-        <div class="btns"><a class="btn" href="/edit"><i data-ic="plus" class="s"></i><span>New project</span></a></div>
+        <div class="btns"><a class="btn" href="/"><i data-ic="home" class="s"></i><span>All projects</span></a></div>
       </div>
       <details class="sec"><summary><i data-ic="folder"></i>Other projects<i data-ic="chev" class="chev"></i></summary><div class="pad"><div id="projList" class="list"></div></div></details>
     </section>
@@ -70,7 +43,8 @@
     <section data-for="cut" hidden>
       <div class="side-h"><h2>Cut into pieces</h2></div>
       <div class="pad">
-        <p class="hint">Chop the whole video into equal pieces. Then keep or remove them by a pattern, or work on them by hand in the timeline.</p>
+        <div class="steps" data-steps></div>
+        <p class="hint">Chop the video into equal pieces (in step 2 and later: the pinned step before). Then keep or remove them by a pattern, or work on them by hand in the timeline.</p>
         <div class="field"><span>Length of each piece</span><div id="cutChips"></div></div>
         <div class="row"><input id="cutSec" class="input short" value="2" inputmode="decimal" aria-label="Seconds per piece"><span class="lbl">seconds</span><span class="grow"></span><button id="cutBtn" class="btn primary"><i data-ic="scissors" class="s"></i><span>Cut</span></button></div>
         <div id="cutNote" class="note" aria-live="polite"></div>
@@ -82,7 +56,7 @@
     <section data-for="pattern" hidden>
       <div class="side-h"><h2>Pattern</h2></div>
       <div class="pad">
-        <p class="hint">Works on the pieces in the timeline, from left to right.</p>
+        <div class="steps" data-steps></div>
         <div class="field"><span>In every group of</span><div id="patGroup"></div></div>
         <div class="field"><span>Pick piece number</span><div id="patPicks" class="chips"></div></div>
         <div id="patPreview" class="patprev" aria-hidden="true"></div>
@@ -112,7 +86,6 @@
         <div id="musicProg" class="prog" hidden><i></i></div>
         <div class="field"><span>Music loudness</span><input type="range" id="sMusicVol" class="rng" min="0" max="1" step="0.05"></div>
         <label class="swl">Music gets quieter when someone talks <input type="checkbox" id="sDuck" class="sw"></label>
-        <label class="swl">Make the loudness even <input type="checkbox" id="sLoud" class="sw"></label>
         <div id="audioNote" class="note" aria-live="polite"></div>
       </div>
       <details class="sec"><summary><i data-ic="music"></i>Cut on the beat<i data-ic="chev" class="chev"></i></summary>
@@ -122,6 +95,21 @@
           <div id="beatNote" class="note" aria-live="polite"></div>
         </div>
       </details>
+    </section>
+
+    <!-- Sound clean-up -->
+    <section data-for="sound" hidden>
+      <div class="side-h"><h2>Sound</h2></div>
+      <div class="pad">
+          <div class="field"><span>Remove noise (hiss, hum, wind)</span><select id="sNoise"><option value="off">Off</option><option value="light">Light</option><option value="medium">Medium</option><option value="strong">Strong</option></select></div>
+          <div class="field"><span>Voices</span><select id="sVocals"><option value="keep">Keep as they are</option><option value="remove">Remove voices (keep the music)</option><option value="voice">Voices only (drop the music)</option></select></div>
+          <label class="swl">Make voices clearer <input type="checkbox" id="sBoost" class="sw"></label>
+          <label class="swl">Balance quiet and loud parts <input type="checkbox" id="sComp" class="sw"></label>
+          <label class="swl">Make the loudness even (like TV and YouTube) <input type="checkbox" id="sLoud" class="sw"></label>
+          <div class="field"><span>Bass <b class="num" id="sBassV"></b></span><input type="range" id="sBass" class="rng" min="-12" max="12" step="1" aria-label="Bass"></div>
+          <div class="field"><span>Treble <b class="num" id="sTrebleV"></b></span><input type="range" id="sTreble" class="rng" min="-12" max="12" step="1" aria-label="Treble"></div>
+          <p class="hint">You hear these in Quick preview and in the export (the live viewer plays the plain sound). Removing voices works on stereo sound.</p>
+        </div>
     </section>
 
     <!-- Format -->
@@ -223,6 +211,7 @@
 </div>
 
 <script src="/static/ui.js"></script>
+<script src="/static/steps.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

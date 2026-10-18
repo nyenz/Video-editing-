@@ -31,13 +31,16 @@ async function loadFiles() {
   if (!C.files.length) box.append(el("p", { class: "hint", text: "No videos yet." }));
   for (const f of C.files) box.append(el("div", { class: "item" + (f.id === C.file ? " on" : ""), onclick: () => openFile(f.id), title: f.name },
     el("img", { class: "thumb", alt: "", src: thumbUrl(f.id, 1), loading: "lazy" }),
-    el("div", { class: "t" }, el("b", { text: f.name }), el("small", { text: fmtSize(f.size) + " · " + f.where }))));
+    el("div", { class: "t" }, el("b", { text: f.name }), el("small", { text: fmtSize(f.size) + " · " + (f.linked ? "used where it is" : f.where), title: f.where }))));
 }
+/** Add a video: chosen in the computer's file window (used where it is), or dropped (a copy is sent). */
 async function addFile(file) {
-  const bar = $("uploadProg"); bar.hidden = false; $("uploadNote").textContent = "Adding " + file.name + "…";
+  const bar = $("uploadProg");
+  const prog = (k) => { bar.hidden = false; bar.firstChild.style.width = Math.round(k * 100) + "%"; $("uploadNote").textContent = "Copying " + (file ? file.name : "the video") + " into the app… " + Math.round(k * 100) + "%"; };
   try {
-    const d = await uploadFile(file, (k) => { bar.firstChild.style.width = Math.round(k * 100) + "%"; $("uploadNote").textContent = "Adding " + file.name + "… " + Math.round(k * 100) + "%"; });
-    $("uploadNote").textContent = "";
+    const d = file ? await uploadFile(file, prog) : await chooseFile("media", prog, "video/*,audio/*,.mkv,.mov,.avi,.ts");
+    if (!d) return;
+    $("uploadNote").textContent = d.linked ? "Used where it is: " + d.where : "";
     await loadFiles(); openFile(d.id);
   } catch (e) { $("uploadNote").textContent = errText(e); }
   finally { bar.hidden = true; }
@@ -51,7 +54,7 @@ function banner(text, k) {
 async function openFile(id) {
   video.pause();
   C.file = id; C.start = C.end = null; C.stopAt = null; C.usingLight = false;
-  history.replaceState(null, "", id ? "/?open=" + encodeURIComponent(id) : "/");
+  history.replaceState(null, "", id ? "/clips?open=" + encodeURIComponent(id) : "/clips");
   try { C.info = await api("/api/info?id=" + encodeURIComponent(id)); }
   catch (e) { $("uploadNote").textContent = errText(e); return; }
   for (const it of $("fileList").children) it.classList.toggle("on", it.title === id.split("/").pop());
@@ -67,13 +70,20 @@ async function openFile(id) {
   else {
     if (i.plays_in_browser) video.src = mediaUrl(id, false);
     else { video.removeAttribute("src"); }
+    let quick = false;
     if (i.has_video) ensurePreview(id, i, (st) => {
       if (C.file !== id) return;
-      if (st.state === "running" && !i.plays_in_browser) banner("This video's sound or picture cannot play in a browser (" + i.playback_note + "). Making a light copy so you can watch and hear it… " + Math.round(st.progress * 100) + "%", st.progress);
+      if (st.state === "running" && !i.plays_in_browser) banner(quick ? "Playing a quick copy. Making a lighter one for smoother jumping… " + Math.round(st.progress * 100) + "%"
+        : "This video's sound or picture cannot play in a browser (" + i.playback_note + "). Making a copy you can watch and hear… " + Math.round(st.progress * 100) + "%", st.progress);
       if (st.state === "failed") banner("A light copy could not be made: " + st.error, 0);
-    }, !i.plays_in_browser).then((ok) => { if (ok && C.file === id) { banner(null); useLight(); } });
+    }, !i.plays_in_browser, () => { if (C.file === id && !i.plays_in_browser) { quick = true; useQuick(); } }).then((ok) => { if (ok && C.file === id) { banner(null); useLight(); } });
   }
   fitZoom(); renderAll();
+}
+function useQuick() {
+  const at = video.currentTime || 0;
+  video.src = mediaUrl(C.file, "q");
+  video.addEventListener("loadedmetadata", () => { video.currentTime = Math.min(at, dur()); }, { once: true });
 }
 function useLight() {
   const at = video.currentTime || 0;
@@ -292,7 +302,7 @@ function onTimelineDown(e) {
 // ------------------------------------------------------------------ wiring
 function wire() {
   const drop = $("drop");
-  drop.addEventListener("click", async () => { const f = await pickFile("video/*,audio/*,.mkv,.mov,.avi,.ts"); if (f) addFile(f); });
+  drop.addEventListener("click", () => addFile(null));
   drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drop.click(); } });
   dropTarget(drop, addFile);
   $("tPlay").addEventListener("click", togglePlay);
@@ -348,12 +358,10 @@ function wire() {
 }
 
 (async function init() {
-  topBar("/");
+  topBar("/clips");
   paintIcons(); wire();
   Exports.onFiles = () => loadFiles().catch(() => {});
   try {
-    const st = await api("/api/state");
-    $("mediaNote").textContent = "Uploading a very big file takes a while. It is faster to copy it into this folder on your computer, then reload this page: " + st.media_dir;
     await loadFiles();
     const want = new URLSearchParams(location.search).get("open");
     if (want) openFile(want);

@@ -1,9 +1,9 @@
-# EditForge
+# Nyenz Edit (EditForge)
 
 A free video editor that runs on your own computer. You write a few simple lines ("keep 0:10-0:40", "speed 2 from 15 to 20", "loudnorm") and
 EditForge makes the video. No accounts, no cloud, no tracking, nothing is sent anywhere.
 
-**Version 1.4.0.** Read SELF_REVIEW.md for what was and was not tested.
+**Version 1.5.0.** Read SELF_REVIEW.md for what was and was not tested.
 
 ## Install on Windows (one file, like any program)
 1. Open https://github.com/nyenz/Video-editing-/releases/latest and download **EditForge-Setup.exe**.
@@ -13,21 +13,35 @@ EditForge makes the video. No accounts, no cloud, no tracking, nothing is sent a
 Everything is inside: Python, FFmpeg, face tracking and automatic captions. Nothing else to install.
 EditForge opens in its own window. Close the window to stop it (a video still being made is finished first).
 
+**Updates install themselves.** About once a day the app looks for a new version. When there is one, a small **Update available**
+button shows at the top. Click it, then **Update now**: it downloads, checks the file, waits until no video is being made, then the app
+closes, updates and opens again. Your projects and videos stay. (No internet: nothing happens.)
+
 **Mac and Linux:** install Python 3.10+ and FFmpeg (`brew install ffmpeg` or `sudo apt install ffmpeg`), then run `start.command` or `bash start.sh`.
 
-## The four pages
+## Home
+The first screen. One big **Create project** button: choose a video and it opens in the Editor, already cut into pieces.
+Below it: **Clips**, **Editor** and **Combine**, then your **projects** (picture, name, `size | length`, newest opened first).
+Search, grid or list, and a **Trash** you can undo (**Empty trash** deletes for good). On a project's **...** menu: Open, Rename,
+Duplicate, Move to trash. A project whose video was moved or deleted shows **Video not found**: click **Find it again**.
+
+**Big videos are not copied.** "Choose file" opens the normal Windows file window and uses the video where it is on your disk.
+(Dropping a file on the page still sends a copy; that copy is deleted when its project is deleted.) **Storage** (bottom left) shows
+the space the app uses and has **Free up** buttons; light copies and pictures not used for a month are removed by themselves.
+
+## The pages
 The bar at the top has **Clips**, **Editor**, **Combine** and **Advanced**. **Exports** (top right) lists the videos you made:
 watch them, **Save** them, or open them in the Editor. The length of what you are making is always shown.
 
 ### Clips: cut parts out of a long video
-1. Drop a video on the left (or pick one you added before).
+1. Press **Choose file** on the left (or pick one you added before).
 2. Play it. Press **Start here** and **End here** (or the keys **I** and **O**), or simply drag across the strip in the timeline.
    The length shows while you mark. Drag the yellow edges to change it.
 3. Press **Add clip** (or **Enter**). Repeat. The list on the right shows each clip's length and the total.
 4. Tick clips to use only those. **Join** makes one video of them (the length shows on the button); **Separate** makes one video each.
 
-Films with Dolby or DTS sound (often .mkv) play silent or black in a browser. EditForge sees this and makes a light copy with
-normal sound for watching. Your clips are always cut from the original, so quality is not lost.
+Films with Dolby or DTS sound (often .mkv) play silent or black in a browser. EditForge sees this and first makes a quick copy
+(picture as it is, normal sound; seconds, not minutes), then a light copy for smooth jumping. Your clips are always cut from the original, so quality is not lost.
 
 ### Editor: pieces on a timeline, like CapCut
 1. Choose a video and a piece length (for example 2 seconds). It opens already cut into pieces.
@@ -38,8 +52,15 @@ normal sound for watching. Your clips are always cut from the original, so quali
    **S** splits at the red playhead, **Delete** removes, **Ctrl+Z** undoes. Removed pieces can be put back (right side).
 4. The right side shows the selected pieces: speed, loudness, mute, start and end. **Effects, Colour, Zoom and Follow** are folded away
    until you open them.
-5. **Finish** (left, below the line): **Audio** (music, beat cuts), **Format** (tall 9:16, square, transitions, fades), **Text** (words, captions).
-6. **Export** (top right): see the length and size, then **Quick preview** or **Export**.
+5. **Steps** (top of Cut and Pattern): press **Pin** to lock the result (with your hand edits) and start step 2 from it: cut it again
+   (for example 3 s pieces) and use another pattern. Nothing is rendered between steps, so every piece is still a part of the
+   ORIGINAL video: dragging an edge always reaches the real footage, also footage an earlier step removed (it stops at the next piece).
+   **All steps** shows each step's pattern and length; click one to look at it (older steps are locked), **Undo step**, and
+   **Save steps** to repeat them on another video (from Saved patterns).
+6. **Finish** (left, below the line): **Audio** (music, beat cuts), **Sound** (remove noise, remove voices or keep only voices,
+   clearer voices, balance quiet and loud parts, even loudness, bass and treble), **Format** (tall 9:16, square, transitions, fades),
+   **Text** (words, captions).
+7. **Export** (top right): see the length and size, then **Quick preview** or **Export**.
 
 The viewer plays your edit live from a light copy; the export is made from the original, exact to the frame.
 

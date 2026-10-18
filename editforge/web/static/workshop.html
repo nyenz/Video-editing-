@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="ef-token" content="{{TOKEN}}">
 <meta name="ef-version" content="{{VERSION}}">
-<title>Clips · EditForge</title>
+<title>Clips · Nyenz Edit</title>
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/ui.css">
 </head>
@@ -14,17 +14,13 @@
   <aside class="side left" aria-label="Videos">
     <div class="side-h"><h2>Videos</h2></div>
     <div class="pad">
-      <div id="drop" class="drop" tabindex="0" role="button" aria-label="Add a video">
-        <i data-ic="upload"></i><b>Drop a video here</b><span class="hint">or click to choose a file</span>
+      <div id="drop" class="drop" tabindex="0" role="button" aria-label="Choose a video">
+        <i data-ic="folder"></i><b>Choose file</b><span class="hint">Used where it is, nothing is copied. (Dropping a file here sends a copy.)</span>
       </div>
       <div id="uploadProg" class="prog" hidden><i></i></div>
       <span id="uploadNote" class="note" aria-live="polite"></span>
       <div id="fileList" class="list"></div>
     </div>
-    <details class="sec">
-      <summary><i data-ic="folder"></i><span>Very big video?</span><i data-ic="chev" class="chev"></i></summary>
-      <div class="pad"><p class="hint" id="mediaNote"></p></div>
-    </details>
   </aside>
 
   <main class="view" aria-label="Viewer">

@@ -66,7 +66,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "shape": "original", "transition": "none", "transition_s": 0.3, "music": "", "music_volume": 0.25, "duck": True,
     "original_sound": True, "even_loudness": False, "fade_in": 0.0, "fade_out": 0.0, "quality": "best",
     "captions": "off", "caption_style": "karaoke", "caption_position": "bottom", "caption_size": "medium",
+    # sound clean-up
+    "noise": "off", "vocals": "keep", "voice_boost": False, "compress": False, "bass": 0.0, "treble": 0.0,
 }
+NOISE_LEVELS = {"off": 0.0, "light": 10.0, "medium": 18.0, "strong": 28.0}
+VOCALS = ("keep", "remove", "voice")
 
 
 def _num(value: Any, default: float, lo: float, hi: float) -> float:
@@ -114,7 +118,11 @@ def clean_piece(raw: Any, duration: float) -> Optional[Dict[str, Any]]:
         points.sort()
     if follow_mode == "object" and len(points) < 2:
         follow_mode = "none"
-    return {
+    extra: Dict[str, Any] = {}
+    unit = raw.get("unit")
+    if isinstance(unit, int) and not isinstance(unit, bool) and 0 <= unit <= 10 * MAX_PIECES:
+        extra["unit"] = unit                  # pieces cut from one new piece in a later step share a unit (see recut)
+    return {**extra,
         "start": round(start, 4), "end": round(end, 4), "off": bool(raw.get("off")),
         "speed": round(_num(raw.get("speed"), 1.0, 0.1, 16.0), 4), "reverse": bool(raw.get("reverse")),
         "mute": bool(raw.get("mute")), "volume": round(_num(raw.get("volume"), 1.0, 0.0, 4.0), 3), "fx": fx,
@@ -170,6 +178,15 @@ def clean_settings(raw: Any) -> Dict[str, Any]:
         s["caption_position"] = raw["caption_position"]
     if raw.get("caption_size") in CAPTION_SIZES:
         s["caption_size"] = raw["caption_size"]
+    if raw.get("noise") in NOISE_LEVELS:
+        s["noise"] = raw["noise"]
+    if raw.get("vocals") in VOCALS:
+        s["vocals"] = raw["vocals"]
+    for key in ("voice_boost", "compress"):
+        if key in raw:
+            s[key] = bool(raw[key])
+    s["bass"] = round(_num(raw.get("bass"), 0.0, -12.0, 12.0), 1)
+    s["treble"] = round(_num(raw.get("treble"), 0.0, -12.0, 12.0), 1)
     return s
 
 
@@ -182,8 +199,122 @@ def clean_project(raw: Any, duration: float) -> Dict[str, Any]:
         raise EditForgeError(f"A project can have at most {MAX_PIECES:,} pieces.", "Slice into longer pieces, or work on a shorter clip.")
     pieces = [p for p in (clean_piece(x, duration) for x in pieces_raw) if p is not None]
     name = " ".join(str(raw.get("name") or "").split())[:80] or "My project"
+    steps: List[Dict[str, Any]] = []
+    for st in (raw.get("steps") if isinstance(raw.get("steps"), list) else [])[:MAX_STEPS]:
+        if not isinstance(st, dict) or not isinstance(st.get("pieces"), list) or len(st["pieces"]) > MAX_PIECES:
+            continue
+        sp = [p for p in (clean_piece(x, duration) for x in st["pieces"]) if p is not None]
+        steps.append({"pieces": sp, "rule": clean_rule(st.get("rule")), "length": round(step_length(sp), 3)})
     return {"name": name, "source": str(raw.get("source") or "")[:300], "pieces": pieces, "settings": clean_settings(raw.get("settings")),
-            "texts": clean_texts(raw.get("texts"))}
+            "texts": clean_texts(raw.get("texts")), "steps": steps, "rule": clean_rule(raw.get("rule"))}
+
+
+# ------------------------------------------------------------------ steps: stacked patterns on the same parent video
+# A step is a list of pieces. Every piece is only a note "from this second to that second of the PARENT video",
+# so nothing is rendered between steps: pinning a step lays its pieces end to end, and the next step cuts that
+# into new pieces again. Extending a piece in any step therefore grows into the real footage of the parent,
+# also footage an earlier step removed. Export cuts the last step's pieces from the parent once.
+MAX_STEPS = 30
+SNAP = 0.08          # a new cut closer than this to the edge of a pinned piece goes onto that edge (no slivers)
+
+
+def clean_rule(raw: Any) -> Optional[Dict[str, Any]]:
+    """How a step was made: piece length, and the pattern applied (to show it, and to repeat it on another video)."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        interval = round(_num(raw.get("interval"), 0.0, 0.0, 3600.0), 3)
+        group = max(1, min(100, int(raw.get("group") or 1)))
+        picks = sorted({int(x) for x in raw.get("picks") or [] if 1 <= int(x) <= group})
+    except (TypeError, ValueError):
+        return None
+    action = raw.get("action") if raw.get("action") in ("remove", "keep") else ""
+    return {"interval": interval, "group": group, "picks": picks if action else [], "action": action, "hand": bool(raw.get("hand"))}
+
+
+def out_len(p: Dict[str, Any]) -> float:
+    return (p["end"] - p["start"]) / (p.get("speed") or 1.0)
+
+
+def step_length(pieces: Sequence[Dict[str, Any]]) -> float:
+    """Length of a step as it plays (removed pieces do not count)."""
+    return sum(out_len(p) for p in pieces if not p.get("off"))
+
+
+def recut(pieces: Sequence[Dict[str, Any]], interval: float) -> List[Dict[str, Any]]:
+    """Cut the kept pieces, laid end to end, into new pieces of ``interval`` seconds (of playing time).
+
+    Each result is again a range of the parent video. A new piece that spans the join of two old pieces
+    becomes two parts with the same ``unit`` number, so patterns count it as ONE piece.
+    Everything else of the old piece (speed, backwards, effects, colour ...) is kept.
+    """
+    if interval < 0.1:
+        raise EditForgeError("Pieces must be at least 0.1 seconds long.", "Choose a longer time, for example 2 seconds.")
+    kept = [p for p in pieces if not p.get("off")]
+    total = sum(out_len(p) for p in kept)
+    n = int(math.floor(total / interval + 1e-9))
+    cuts = [k * interval for k in range(1, n + 1) if total - k * interval >= SNAP]
+    if len(cuts) + 1 > MAX_PIECES:
+        raise EditForgeError(f"That would make {len(cuts) + 1:,} pieces (the most is {MAX_PIECES:,}).", "Choose a longer time for each piece.")
+    out: List[Dict[str, Any]] = []
+    o0 = 0.0
+    for p in kept:
+        o1 = o0 + out_len(p)
+        pts = [o0] + [c for c in cuts if o0 + SNAP < c < o1 - SNAP] + [o1]
+        sp = p.get("speed") or 1.0
+        for a, b in zip(pts, pts[1:]):
+            if p.get("reverse"):
+                s0, s1 = p["end"] - (b - o0) * sp, p["end"] - (a - o0) * sp
+            else:
+                s0, s1 = p["start"] + (a - o0) * sp, p["start"] + (b - o0) * sp
+            q = dict(p, start=round(max(p["start"], s0), 4), end=round(min(p["end"], s1), 4), off=False)
+            q["unit"] = sum(1 for c in cuts if c <= a + SNAP)
+            if q["end"] - q["start"] >= MIN_PIECE_SECONDS:
+                out.append(q)
+        o0 = o1
+    return out
+
+
+def units(pieces: Sequence[Dict[str, Any]]) -> List[int]:
+    """The pattern number of each piece: pieces next to each other with the same unit count as one."""
+    out: List[int] = []
+    n, prev = -1, None
+    for p in pieces:
+        u = p.get("unit")
+        if u is None or u != prev:
+            n += 1
+        out.append(n)
+        prev = u
+    return out
+
+
+def apply_pattern(pieces: List[Dict[str, Any]], group: int, picks: Sequence[int], action: str) -> List[Dict[str, Any]]:
+    """Remove (or keep only) the picked pieces of every group, counted on the kept pieces from left to right."""
+    kept = [p for p in pieces if not p.get("off")]
+    want = set(picks)
+    for p, u in zip(kept, units(kept)):
+        hit = (u % group) + 1 in want
+        if (action == "remove" and hit) or (action == "keep" and not hit):
+            p["off"] = True
+    return pieces
+
+
+def extend_limits(pieces: Sequence[Dict[str, Any]], index: int, duration: float) -> tuple:
+    """How far piece ``index`` may grow: (earliest start, latest end) in parent time.
+
+    It may grow into any footage that no other kept piece of the same step uses (also footage an earlier
+    step removed), and stops at the neighbour. Pieces that already overlap it (a copy) do not stop it.
+    """
+    p = pieces[index]
+    lo, hi = 0.0, float(duration)
+    for k, q in enumerate(pieces):
+        if k == index or q.get("off"):
+            continue
+        if q["start"] >= p["end"] - 1e-6:
+            hi = min(hi, q["start"])
+        elif q["end"] <= p["start"] + 1e-6:
+            lo = max(lo, q["end"])
+    return lo, hi
 
 
 def slice_pieces(duration: float, interval: float) -> List[Dict[str, Any]]:
@@ -367,6 +498,16 @@ def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional
                                      0.0, None, True, 0.5, 1.5))
     if st["even_loudness"] and (music_path or (media.has_audio and not silent)):
         audio.loudnorm = {"target": -14.0, "true_peak": -1.5, "lra": 11.0}
+    if media.has_audio and not silent:
+        if st["noise"] != "off":
+            audio.denoise = {"amount": NOISE_LEVELS[st["noise"]], "highpass": True}
+        vocals = st["vocals"]
+        if vocals != "keep" and media.channels < 2:
+            planner.warn("Removing or keeping only voices needs stereo sound, and this video's sound is mono, so it was left as it is.")
+            vocals = "keep"
+        voice = {"vocals": vocals, "boost": st["voice_boost"], "compress": st["compress"], "bass": st["bass"], "treble": st["treble"]}
+        if vocals != "keep" or st["voice_boost"] or st["compress"] or abs(st["bass"]) >= 0.5 or abs(st["treble"]) >= 0.5:
+            audio.voice = voice
     audio.fade_in, audio.fade_out = float(st["fade_in"]), float(st["fade_out"])
     audio.fade_video = planner.has_video
     texts: List[TextOverlay] = []

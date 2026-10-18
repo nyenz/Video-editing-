@@ -18,6 +18,20 @@ Machine: 1 CPU, 4 GB RAM, FFmpeg 6.1.1 (libx264), software encoder, default `--m
 Memory does not grow with the number of cuts. The automated test (640x360, 6 vs 40 cuts) asserts < 300 MB and "40 cuts within 40 MB of 6 cuts".
 Before tuning, the same 1080p job measured about 403 MB; the fix was size-dependent x264 settings plus a measured memory model (`core/resources.py`).
 
+## Loading (version 1.5.0, `python tools/bench_app.py film.mkv`)
+Sandbox: 2 CPUs, Linux, FFmpeg from the system. Film: 5 min, 1920x1080 H.264 with 5.1 AC-3 sound in .mkv (500 MB). Not a Windows PC.
+
+| step | 1.4.0 | 1.5.0 |
+|---|---|---|
+| server ready | 0.17 s | 0.18 s |
+| first page with its scripts | 87 KB | 27 KB (gzip; then kept by the window) |
+| add-on check | 0.19 s | 0.02 s |
+| video facts, first time / again | 0.40 s / 0.16 s | 0.27 s / 0.002 s |
+| new project / open / autosave | 0.21 / 0.07 / 0.08 s | 0.008 / 0.005 / 0.008 s |
+| film plays with sound | 44 s (light copy) | 8 s (quick copy), light copy after 50 s |
+
+The Windows self-test in GitHub Actions prints `TIME` lines (app start to server ready, each page, the add-on check).
+
 ## Not measured
 * No comparison with the four older apps was run (they were not available here), so no speed-up claim is made.
 * 4K output: the memory model predicts about 490 MB for one worker; this was not run.

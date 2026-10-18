@@ -37,19 +37,46 @@ from ..jobs.manager import JobManager
 from ..jobs.store import JobStore
 from ..presets.presets import PRESETS
 from ..version import __version__
+from . import choose as choose_mod
 from .preview import PreviewMaker
 from .. import combine as combine_mod
 from .. import project as project_mod
 
 STATIC_DIR = Path(__file__).parent / "static"
 JS, CSS = "application/javascript; charset=utf-8", "text/css; charset=utf-8"
-STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "combine.js": JS,
-                "logo.svg": "image/svg+xml", "logo.png": "image/png"}
+STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "steps.js": JS, "combine.js": JS,
+                "home.js": JS, "logo.svg": "image/svg+xml", "logo.png": "image/png"}
+_STATIC: Dict[str, Tuple[int, bytes, bytes, str]] = {}          # name -> (mtime, body, gzipped body, etag)
+_STATIC_REF = re.compile(r'(/static/([\w.]+))(?=")')
+
+
+def static_file(name: str) -> Tuple[bytes, bytes, str]:
+    """A file of the page, its gzipped form and a short content hash (made once, again only if the file changes)."""
+    import gzip
+    import hashlib
+    path = STATIC_DIR / name
+    mtime = path.stat().st_mtime_ns
+    hit = _STATIC.get(name)
+    if hit is None or hit[0] != mtime:
+        body = path.read_bytes()
+        packed = gzip.compress(body, 9, mtime=0) if not name.endswith(".png") else b""
+        hit = (mtime, body, packed, hashlib.sha256(body).hexdigest()[:16])
+        _STATIC[name] = hit
+    return hit[1], hit[2], hit[3]
+
+
+def versioned(html: str) -> str:
+    """Give every /static/ link in a page its content hash (?v=...), so the window keeps the file until it really changes."""
+    def fix(m: "re.Match[str]") -> str:
+        if m.group(2) not in STATIC_FILES:
+            return m.group(1)
+        return m.group(1) + "?v=" + static_file(m.group(2))[2]
+    return _STATIC_REF.sub(fix, html)
 #: what browsers (Chrome, Edge, Brave, Firefox) play inside a page without help
 BROWSER_VIDEO = {"h264", "vp8", "vp9", "av1"}
 BROWSER_AUDIO = {"aac", "mp3", "opus", "vorbis", "flac"}
 BROWSER_CONTAINERS = {".mp4", ".m4v", ".mov", ".webm"}
-PAGES = {"/": "workshop.html", "/edit": "editor.html", "/combine": "combine.html", "/advanced": "index.html"}
+PAGES = {"/": "home.html", "/clips": "workshop.html", "/edit": "editor.html", "/combine": "combine.html", "/advanced": "index.html"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"}
 SUBTITLE_EXTS = {".srt", ".vtt"}
 MAX_SUBTITLE_BYTES = 5 * 1024 * 1024
@@ -96,6 +123,41 @@ def playback_check(path: str, info: Dict[str, Any]) -> Tuple[bool, str]:
     return True, ""
 
 
+_FEATURES: Dict[str, bool] = {}
+
+
+def quick_features() -> Dict[str, bool]:
+    """Which add-ons are installed, WITHOUT loading them (loading OpenCV and Whisper takes seconds on a cold start).
+
+    They are loaded only when face tracking or captions are really used.
+    """
+    if not _FEATURES:
+        import importlib.util
+
+        def has(mod: str) -> bool:
+            try:
+                return importlib.util.find_spec(mod) is not None
+            except (ImportError, ValueError):
+                return False
+
+        cv = has("cv2") and _opencv_major() < 5           # OpenCV 5 dropped the face finder EditForge uses
+        _FEATURES.update({"captions": has("faster_whisper"), "faces": cv, "objects": cv and has("numpy")})
+    return dict(_FEATURES)
+
+
+def _opencv_major() -> int:
+    try:
+        from importlib import metadata
+    except ImportError:  # pragma: no cover
+        return 4
+    for dist in ("opencv-python-headless", "opencv-python", "opencv-contrib-python", "opencv-contrib-python-headless"):
+        try:
+            return int(metadata.version(dist).split(".")[0])
+        except Exception:  # noqa: BLE001 - not installed under this name (or no metadata in the app): try the next
+            continue
+    return 4
+
+
 def examples_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "examples"
 
@@ -103,8 +165,12 @@ def examples_dir() -> Path:
 class AppState:
     """Everything the request handlers share."""
 
-    def __init__(self, host: str, port: int, media_dir: Optional[str] = None, home: Optional[Path] = None):
+    def __init__(self, host: str, port: int, media_dir: Optional[str] = None, home: Optional[Path] = None,
+                 app_mode: bool = False):
         self.host, self.port = host, port
+        # app_mode: the real app (desktop or `editforge web`): light copies start as soon as a video is added,
+        # old copies are cleaned up, and updates are looked for. Tests leave it off.
+        self.app_mode = app_mode
         self.token = secrets.token_hex(16)
         self.home = Path(home) if home else home_dir()
         self.uploads = self.home / "uploads"
@@ -129,13 +195,114 @@ class AppState:
             roots.append(str(examples_dir().resolve()))
         self.allowed_roots = roots
         self.manager = JobManager(self.store, allowed_roots=roots, base_dir=str(self.media))
+        # Linked files: videos used where they are on the computer (no copy). Only files the person chose
+        # in the file window are linked, and only those exact files may be read (each is added to allowed_roots).
+        self.links_file = self.home / "links.json"
+        self.links: Dict[str, Dict[str, Any]] = {}
+        self.last_dir = ""
+        self._load_links()
+        self.chooser = choose_mod.choose_file          # replaced in the tests
+        self.quit_app = lambda: None                   # the desktop app closes itself here (after an update)
+        from ..updater import Updater
+        self.updater = Updater(self.home)
+        if app_mode:
+            self.updater.clean()
+            self.updater.check_in_background()
+            threading.Thread(target=self.auto_clean, name="editforge-clean", daemon=True).start()
+
+    # ---- linked files ------------------------------------------------------------------------------
+    def _load_links(self) -> None:
+        try:
+            data = json.loads(self.links_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        self.last_dir = str(data.get("last_dir") or "")
+        for lid, e in (data.get("files") or {}).items():
+            if re.fullmatch(r"[0-9a-f]{12}", str(lid)) and isinstance(e, dict) and e.get("path"):
+                self.links[lid] = {"path": str(e["path"]), "name": str(e.get("name") or Path(str(e["path"])).name),
+                                   "size": int(e.get("size") or 0), "mtime": float(e.get("mtime") or 0), "added": float(e.get("added") or 0)}
+                self._allow(self.links[lid]["path"])
+
+    def _save_links(self) -> None:
+        with self._lock:
+            data = {"last_dir": self.last_dir, "files": self.links}
+            atomic_write_json(self.links_file, data)
+
+    def _allow(self, path: str) -> None:
+        if path not in self.allowed_roots:
+            self.allowed_roots.append(path)            # the job runner may read exactly this file
+
+    def link_file(self, path: str) -> str:
+        """Use a file where it is. Returns its file id 'l/<id>/<name>' (the same id if it was linked before)."""
+        real = Path(path).expanduser().resolve()
+        if not real.is_file():
+            raise EditForgeError("I can't find that file.", "Choose it again.")
+        st = real.stat()
+        for lid, e in self.links.items():
+            if e["path"] == str(real):
+                e.update(size=st.st_size, mtime=st.st_mtime)
+                self._save_links()
+                return f"l/{lid}/{clean_filename(e['name'])}"
+        lid = uuid.uuid4().hex[:12]
+        self.links[lid] = {"path": str(real), "name": real.name, "size": st.st_size, "mtime": st.st_mtime, "added": time.time()}
+        self.last_dir = str(real.parent)
+        self._allow(str(real))
+        self._save_links()
+        return f"l/{lid}/{clean_filename(real.name)}"
+
+    def link_path(self, ident: str) -> Optional[str]:
+        """Where a linked file lives (for the page to show), or None."""
+        m = re.fullmatch(r"l/([0-9a-f]{12})/[^/\\]+", ident or "")
+        e = self.links.get(m.group(1)) if m else None
+        return e["path"] if e else None
+
+    def can_choose(self) -> bool:
+        return os.name == "nt" or sys.platform == "darwin" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+    def choose(self, kind: str) -> Optional[str]:
+        """Open the computer's file window; returns the new file id, or None when cancelled."""
+        try:
+            path = self.chooser(kind if kind in choose_mod.KINDS else "video", self.last_dir or str(Path.home()))
+        except choose_mod.Busy:
+            raise EditForgeError("A file window is already open.", "Look for it behind the EditForge window.")
+        return self.link_file(path) if path else None
+
+    def after_add(self, ident: str) -> None:
+        """A video was just added: start its light copy right away (app only), so it is ready when the Editor opens."""
+        if not self.app_mode:
+            return
+        try:
+            src = self.resolve_input(ident)
+            info = probe_media(src)
+            if info.has_video:
+                view = self.media_view(src)
+                if view["preview"]["state"] == "none":
+                    self.start_preview(src, view)
+        except Exception:  # noqa: BLE001 - only a head start; the page asks again when it needs it
+            pass
+
+    def start_preview(self, src: str, view: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        view = view or self.media_view(src)
+        quick = (not view["plays_in_browser"]) and view.get("video_codec") in BROWSER_VIDEO and view.get("pix_fmt") in ("yuv420p", "yuvj420p")
+        return self.previews.start(src, quick=quick)
 
     def allowed_hosts(self) -> List[str]:
         h = {f"127.0.0.1:{self.port}", f"localhost:{self.port}", f"[::1]:{self.port}", f"{self.host}:{self.port}"}
         return sorted(h)
 
     def resolve_input(self, ident: str) -> str:
-        """Turn a file id from the page ('u/<id>/<name>', 'o/<job>/<name>' or 'm/<name>') into a real path inside our folders."""
+        """Turn a file id from the page into a real path: 'u/<id>/<name>', 'o/<job>/<name>' or 'm/<name>' inside our
+        folders, or 'l/<id>/<name>' for a file the person linked (chose in the file window)."""
+        m = re.fullmatch(r"l/([0-9a-f]{12})/([^/\\]+)", ident or "")
+        if m:
+            e = self.links.get(m.group(1))
+            if not e or clean_filename(e["name"]) != m.group(2):
+                raise EditForgeError("That file choice is not valid.", "Choose the file again.")
+            if not os.path.isfile(e["path"]):
+                raise EditForgeError("I can't find that video where it was: " + e["path"], "It was moved or deleted. Choose it again.")
+            return e["path"]
         m = re.fullmatch(r"([uo])/([0-9a-f]{12})/([^/\\]+)", ident or "")
         if m:
             root = self.uploads if m.group(1) == "u" else self.outputs
@@ -176,10 +343,10 @@ class AppState:
         info["preview"] = self.previews.status(src) if info["has_video"] else {"state": "none", "progress": 0.0, "error": ""}
         return info
 
-    def thumbnail(self, src: str, at: float) -> Optional[Path]:
+    def thumbnail(self, src: str, at: float, height: int = 96) -> Optional[Path]:
         """A small JPEG of the picture at ``at`` seconds (made once, then kept). None if it cannot be made."""
         ms = max(0, int(round(at * 1000)))
-        out = self.thumbs / f"{self.fingerprint(src)}_{ms}.jpg"
+        out = self.thumbs / (f"{self.fingerprint(src)}_{ms}.jpg" if height == 96 else f"{self.fingerprint(src)}_{ms}_h{height}.jpg")
         if out.is_file() and out.stat().st_size > 0:
             return out
         light = self.previews.path_for(src)          # the light copy decodes many times faster than a big original
@@ -187,7 +354,7 @@ class AppState:
             src = str(light)
         part = out.with_name(out.name + f".{uuid.uuid4().hex[:8]}.part")
         with self._thumb_slots:
-            res = run_ffmpeg(["-y", "-ss", f"{ms / 1000:.3f}", "-i", src, "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=-2:96",
+            res = run_ffmpeg(["-y", "-ss", f"{ms / 1000:.3f}", "-i", src, "-map", "0:v:0", "-frames:v", "1", "-vf", f"scale=-2:{height}",
                               "-q:v", "6", "-f", "image2", str(part)], timeout=30)
         if res.ok and part.is_file() and part.stat().st_size > 0:
             os.replace(part, out)
@@ -214,25 +381,156 @@ class AppState:
             raise EditForgeError("That project file is damaged.", "Start a new project.")
         return data
 
-    def save_project(self, pid: str, raw: Dict[str, Any], created: Optional[float] = None) -> Dict[str, Any]:
+    def save_project(self, pid: str, raw: Dict[str, Any], created: Optional[float] = None, old: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Clean and store a project. The source video must still exist (its length limits the pieces)."""
         src = self.resolve_input(str(raw.get("source") or ""))
         info = probe_media(src)
         proj = project_mod.clean_project(raw, info.duration)
-        proj.update({"id": pid, "created": created or time.time(), "updated": time.time()})
+        old = old or {}
+        proj.update({"id": pid, "created": created or time.time(), "updated": time.time(),
+                     "opened": float(old.get("opened") or time.time()), "trashed": float(old.get("trashed") or 0),
+                     "src": {"name": Path(src).name, "size": os.path.getsize(src), "duration": round(info.duration, 3),
+                             "has_video": info.has_video, "path": self.link_path(proj["source"]) or ""}})
         atomic_write_json(self.project_path(pid), proj)
         return proj
 
-    def list_projects(self) -> List[Dict[str, Any]]:
+    def edit_project(self, pid: str, **fields: Any) -> Dict[str, Any]:
+        """Change a few fields of a stored project without checking its video (it may be missing)."""
+        proj = self.load_project(pid)
+        proj.update(fields)
+        atomic_write_json(self.project_path(pid), proj)
+        return proj
+
+    def all_projects(self) -> List[Dict[str, Any]]:
         out = []
         for f in self.projects.glob("*.json"):
             try:
                 d = json.loads(f.read_text(encoding="utf-8"))
-                out.append({"id": d["id"], "name": d["name"], "source": d["source"], "source_name": str(d["source"]).rsplit("/", 1)[-1],
-                            "pieces": len(d["pieces"]), "updated": d.get("updated", 0)})
-            except (OSError, ValueError, KeyError, TypeError):
+                if isinstance(d, dict) and d.get("id") and isinstance(d.get("pieces"), list):
+                    out.append(d)
+            except (OSError, ValueError):
                 continue
-        return sorted(out, key=lambda d: d["updated"], reverse=True)
+        return out
+
+    def list_projects(self) -> List[Dict[str, Any]]:
+        """The Home screen's cards: newest opened first. 'missing' when the video was moved or deleted."""
+        out = []
+        for d in self.all_projects():
+            try:
+                src = d.get("src") if isinstance(d.get("src"), dict) else {}
+                try:
+                    path = self.resolve_input(str(d["source"]))
+                    missing = False
+                    size, dur = os.path.getsize(path), float(src.get("duration") or 0)
+                except EditForgeError:
+                    path, missing = "", True
+                    size, dur = int(src.get("size") or 0), float(src.get("duration") or 0)
+                pieces = d["pieces"]
+                out.append({"id": d["id"], "name": d["name"], "source": d["source"], "source_name": str(d["source"]).rsplit("/", 1)[-1],
+                            "pieces": len(pieces), "updated": d.get("updated", 0), "opened": d.get("opened") or d.get("updated", 0),
+                            "trashed": d.get("trashed") or 0, "missing": missing, "size": size, "duration": dur,
+                            "length": round(project_mod.step_length(project_mod.clean_project(d, 1e9)["pieces"]), 3),
+                            "steps": len(d.get("steps") or []), "has_video": bool(src.get("has_video", True)),
+                            "linked": str(d["source"]).startswith("l/"), "where": self.link_path(str(d["source"])) or path,
+                            "thumb_at": _thumb_time(pieces, dur)})
+            except (KeyError, TypeError, ValueError):
+                continue
+        return sorted(out, key=lambda d: d["opened"], reverse=True)
+
+    def delete_project(self, pid: str) -> bool:
+        """Delete for good. A video copy that was sent in (not linked) and that no other project uses is deleted too."""
+        try:
+            proj = self.load_project(pid)
+        except EditForgeError:
+            return False
+        try:
+            self.project_path(pid).unlink()
+        except OSError:
+            return False
+        m = re.fullmatch(r"u/([0-9a-f]{12})/[^/\\]+", str(proj.get("source") or ""))
+        if m and not any(str(d.get("source")) == proj["source"] for d in self.all_projects()):
+            shutil.rmtree(self.uploads / m.group(1), ignore_errors=True)
+        return True
+
+    def duplicate_project(self, pid: str) -> Dict[str, Any]:
+        proj = self.load_project(pid)
+        new = dict(proj, id=uuid.uuid4().hex[:12], name=(str(proj.get("name") or "Project")[:74] + " copy"), created=time.time(),
+                   updated=time.time(), opened=time.time(), trashed=0)
+        atomic_write_json(self.project_path(new["id"]), new)
+        return new
+
+    # ---- storage ------------------------------------------------------------------------------------
+    def storage(self) -> Dict[str, Any]:
+        def size(d: Path) -> int:
+            total = 0
+            for root, _dirs, files in os.walk(d):
+                for f in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+            return total
+        parts = {"uploads": self.uploads, "previews": self.previews.folder, "exports": self.outputs, "thumbs": self.thumbs,
+                 "work": self.home / "work"}
+        out = {k: size(v) for k, v in parts.items()}
+        try:
+            free = shutil.disk_usage(self.home).free
+        except OSError:
+            free = 0
+        used_uploads = {str(d.get("source")).split("/")[1] for d in self.all_projects() if str(d.get("source")).startswith("u/")}
+        loose = sum(size(d) for d in self.uploads.iterdir() if d.is_dir() and d.name not in used_uploads) if self.uploads.exists() else 0
+        return {"sizes": out, "total": sum(out.values()), "free": free, "home": str(self.home), "loose_uploads": loose,
+                "linked": len(self.links)}
+
+    def clean_storage(self, what: str) -> int:
+        """Free space. Returns how many files or folders were removed."""
+        n = 0
+        if what == "previews":                   # light copies: made again when a video is opened
+            busy = {Path(k).name for k, v in self.previews._jobs.items() if v.get("state") == "running"}
+            for f in self.previews.folder.glob("*.mp4"):
+                if f.name not in busy:
+                    n += _unlink(f)
+        elif what == "thumbs":
+            for f in self.thumbs.glob("*.jpg"):
+                n += _unlink(f)
+        elif what == "uploads":                  # copies of videos sent in by dragging, that no project uses
+            used = {str(d.get("source")).split("/")[1] for d in self.all_projects() if str(d.get("source")).startswith("u/")}
+            for d in list(self.uploads.iterdir()):
+                if d.is_dir() and d.name not in used:
+                    shutil.rmtree(d, ignore_errors=True)
+                    n += 1
+        elif what == "work":
+            if not any(j["status"] in ("queued", "running") for j in self.store.list(200)):
+                for d in (self.home / "work").glob("*"):
+                    shutil.rmtree(d, ignore_errors=True) if d.is_dir() else _unlink(d)
+                    n += 1
+        else:
+            raise EditForgeError("Nothing to clean there.", "")
+        return n
+
+    def auto_clean(self, days: float = 30.0) -> None:
+        """At start: remove light copies and pictures not used for a month, and sent-in copies no project uses
+        that are older than a month. Saved projects keep their light copies."""
+        try:
+            cutoff = time.time() - days * DAY_SECONDS
+            keep = set()
+            for d in self.all_projects():
+                try:
+                    keep.add(self.fingerprint(self.resolve_input(str(d["source"]))))
+                except Exception:  # noqa: BLE001
+                    continue
+            for f in self.previews.folder.glob("*.mp4"):
+                if f.name.split(".")[0] not in keep and f.stat().st_mtime < cutoff:
+                    _unlink(f)
+            for f in self.thumbs.glob("*.jpg"):
+                if f.stat().st_mtime < cutoff:
+                    _unlink(f)
+            used = {str(d.get("source")).split("/")[1] for d in self.all_projects() if str(d.get("source")).startswith("u/")}
+            for d in self.uploads.iterdir():
+                if d.is_dir() and d.name not in used and d.stat().st_mtime < cutoff:
+                    shutil.rmtree(d, ignore_errors=True)
+        except Exception:  # noqa: BLE001 - cleaning must never stop the app
+            pass
 
     def load_recipes(self) -> List[Dict[str, Any]]:
         try:
@@ -249,6 +547,12 @@ class AppState:
         for r in raw:
             if not isinstance(r, dict):
                 continue
+            if r.get("type") == "steps":            # a whole stack of steps, to repeat on another video
+                rules = [x for x in (project_mod.clean_rule(x) for x in (r.get("steps") or [])[:project_mod.MAX_STEPS]) if x and x["interval"] > 0]
+                name = " ".join(str(r.get("name") or "").split())[:60]
+                if name and rules:
+                    out.append({"name": name, "type": "steps", "steps": rules})
+                continue
             try:
                 group = max(1, min(100, int(r.get("group", 1))))
                 picks = sorted({int(x) for x in r.get("picks", []) if 1 <= int(x) <= group})
@@ -259,7 +563,7 @@ class AppState:
                 continue
             look = project_mod.clean_piece(dict(r.get("look") or {}, start=0, end=10), 10.0) if isinstance(r.get("look"), dict) else None
             if look:
-                look.pop("start"), look.pop("end")
+                look.pop("start"), look.pop("end"), look.pop("unit", None)
             out.append({"name": name, "group": group, "picks": picks, "look": look})
         atomic_write_json(self.recipes_file, out)
         return out
@@ -289,11 +593,47 @@ class AppState:
                     if f.is_file():
                         out.append({"id": f"u/{d.name}/{f.name}", "name": f.name, "size": f.stat().st_size, "where": "uploaded",
                                     "audio": f.suffix.lower() in AUDIO_EXTS, "subtitles": f.suffix.lower() in SUBTITLE_EXTS})
+        for lid, e in sorted(self.links.items(), key=lambda kv: kv[1]["added"], reverse=True):
+            p = Path(e["path"])
+            if p.is_file():
+                ext = p.suffix.lower()
+                out.append({"id": f"l/{lid}/{clean_filename(e['name'])}", "name": e["name"], "size": p.stat().st_size, "where": str(p.parent),
+                            "linked": True, "audio": ext in AUDIO_EXTS, "subtitles": ext in SUBTITLE_EXTS})
         for f in sorted(self.media.iterdir()):
             if f.is_file() and not f.name.startswith("."):
                 out.append({"id": f"m/{f.name}", "name": f.name, "size": f.stat().st_size, "where": "media folder",
                             "audio": f.suffix.lower() in AUDIO_EXTS, "subtitles": f.suffix.lower() in SUBTITLE_EXTS})
         return out
+
+
+DAY_SECONDS = 24 * 3600
+
+
+def _jobs_busy(state: "AppState") -> bool:
+    try:
+        return any(j["status"] in ("queued", "running") for j in state.store.list(200))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _unlink(p: Path) -> int:
+    try:
+        p.unlink()
+        return 1
+    except OSError:
+        return 0
+
+
+def _thumb_time(pieces: List[Dict[str, Any]], duration: float) -> float:
+    """A moment for the project's picture: a little into the first kept piece (not the black first frame)."""
+    for p in pieces:
+        if isinstance(p, dict) and not p.get("off"):
+            try:
+                a, b = float(p["start"]), float(p["end"])
+                return round(min(b - 0.05, a + min(2.0, (b - a) / 2)), 2)
+            except (KeyError, TypeError, ValueError):
+                break
+    return round(min(1.0, max(0.0, duration - 0.05)), 2)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -315,6 +655,19 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in head.items():
             self.send_header(k, v)
         self.end_headers()
+
+    def _send(self, body: bytes, ctype: str, extra: Optional[Dict[str, str]] = None, packed: Optional[bytes] = None) -> None:
+        """Send a page or file, gzipped when the window accepts it (scripts shrink to about a quarter)."""
+        extra = dict(extra or {})
+        if "gzip" in (self.headers.get("Accept-Encoding") or "") and len(body) > 1024:
+            if packed is None:
+                import gzip
+                packed = gzip.compress(body, 6, mtime=0)
+            if packed:
+                body = packed
+                extra.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+        self._headers(200, ctype, len(body), extra)
+        self.wfile.write(body)
 
     def _json(self, obj: Any, status: int = 200) -> None:
         body = json.dumps(obj, default=str).encode("utf-8")
@@ -380,9 +733,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self._guard(need_token=False) is None:
                     return
                 html = (STATIC_DIR / PAGES[path]).read_text(encoding="utf-8").replace("{{TOKEN}}", self.state.token).replace("{{VERSION}}", __version__)
-                body = html.encode("utf-8")
-                self._headers(200, "text/html; charset=utf-8", len(body))
-                self.wfile.write(body)
+                self._send(versioned(html).encode("utf-8"), "text/html; charset=utf-8")
             elif path == "/favicon.ico":
                 body = (STATIC_DIR / "logo.svg").read_bytes()
                 self._headers(200, "image/svg+xml", len(body), {"Cache-Control": "max-age=86400"})
@@ -397,19 +748,19 @@ class Handler(BaseHTTPRequestHandler):
                 if name not in STATIC_FILES:
                     self._error(404, "Not found.")
                     return
-                body = (STATIC_DIR / name).read_bytes()
-                self._headers(200, STATIC_FILES[name], len(body))
-                self.wfile.write(body)
+                body, packed, tag = static_file(name)
+                want = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("v", [""])[0]
+                cache = "public, max-age=31536000, immutable" if want == tag else "no-cache"
+                etag = f'"{tag}"'
+                if self.headers.get("If-None-Match") == etag:
+                    self._headers(304, STATIC_FILES[name], 0, {"Cache-Control": cache, "ETag": etag})
+                    return
+                self._send(body, STATIC_FILES[name], {"Cache-Control": cache, "ETag": etag}, packed)
             elif path == "/api/state":
                 if self._guard() is None:
                     return
-                from ..analysis.faces import opencv_available
-                from ..analysis.follow import object_tracking_available
-                from ..analysis.speech import whisper_available
                 self._json({"version": __version__, "presets": [{"name": p.name, "label": p.label, "description": p.description} for p in PRESETS],
-                            "features": {"captions": whisper_available(), "faces": opencv_available(),
-                                         "objects": object_tracking_available()},
-                            "media_dir": str(self.state.media)})
+                            "features": quick_features(), "media_dir": str(self.state.media), "can_choose": self.state.can_choose()})
             elif path == "/api/files":
                 if self._guard() is None:
                     return
@@ -451,7 +802,18 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(rf"/api/projects/{PROJECT_ID}", path):
                 if self._guard() is None:
                     return
-                self._json(self._project_view(self.state.load_project(path.rsplit("/", 1)[1])))
+                pid = path.rsplit("/", 1)[1]
+                view = self._project_view(self.state.load_project(pid))
+                self.state.edit_project(pid, opened=time.time())
+                self._json(view)
+            elif path == "/api/storage":
+                if self._guard() is None:
+                    return
+                self._json(self.state.storage())
+            elif path == "/api/update":
+                if self._guard() is None:
+                    return
+                self._json(self.state.updater.status())
             elif path == "/api/recipes":
                 if self._guard() is None:
                     return
@@ -481,6 +843,45 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/upload":
                 self._upload(query)
+            elif path == "/api/choose":
+                data = self._read_json()
+                if data is None:
+                    return
+                try:
+                    ident = self.state.choose(str(data.get("kind") or "video"))
+                except choose_mod.NoDialog:
+                    self._json({"no_dialog": True})
+                    return
+                self._json(self._file_reply(ident) if ident else {"cancelled": True})
+            elif re.fullmatch(rf"/api/projects/{PROJECT_ID}/(rename|duplicate|trash|restore|relink)", path):
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json(self._project_action(path.split("/")[3], path.split("/")[4], data))
+            elif path == "/api/trash/empty":
+                n = sum(self.state.delete_project(d["id"]) for d in self.state.list_projects() if d["trashed"])
+                self._json({"deleted": n})
+            elif path == "/api/storage/clean":
+                data = self._read_json()
+                if data is None:
+                    return
+                n = self.state.clean_storage(str(data.get("what") or ""))
+                self._json({"removed": n, "storage": self.state.storage()})
+            elif path == "/api/update/check":
+                self._json(self.state.updater.check(force=True))
+            elif path == "/api/update/download":
+                self._json(self.state.updater.download())
+            elif path == "/api/update/skip":
+                data = self._read_json()
+                if data is None:
+                    return
+                self.state.updater.skip(str(data.get("version") or ""))
+                self._json(self.state.updater.status())
+            elif path == "/api/update/install":
+                from ..updater import can_install
+                if not can_install():
+                    raise EditForgeError("Only the installed app can update itself.", "Download the new EditForge-Setup.exe from the release page.")
+                self._json(self.state.updater.install(lambda: _jobs_busy(self.state), self.state.quit_app))
             elif path == "/api/validate":
                 data = self._read_json()
                 if data is None:
@@ -492,7 +893,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = self._read_json()
                 if data is None:
                     return
-                self._json(self.state.previews.start(self.state.resolve_input(str(data.get("input", "")))), 202)
+                self._json(self.state.start_preview(self.state.resolve_input(str(data.get("input", "")))), 202)
             elif path == "/api/projects":
                 data = self._read_json()
                 if data is None:
@@ -560,8 +961,8 @@ class Handler(BaseHTTPRequestHandler):
             if re.fullmatch(rf"/api/projects/{PROJECT_ID}", path):
                 pid = path.rsplit("/", 1)[1]
                 old = self.state.load_project(pid)
-                data["source"] = old["source"]          # a project always stays with its own video
-                self._json(self.state.save_project(pid, data, old.get("created")))
+                data["source"] = old["source"]          # a project always stays with its own video (Find it again changes it)
+                self._json(self.state.save_project(pid, data, old.get("created"), old))
             elif path == "/api/recipes":
                 self._json({"recipes": self.state.save_recipes(data)})
             else:
@@ -575,11 +976,7 @@ class Handler(BaseHTTPRequestHandler):
             if self._guard() is None:
                 return
             if re.fullmatch(rf"/api/projects/{PROJECT_ID}", path):
-                try:
-                    self.state.project_path(path.rsplit("/", 1)[1]).unlink()
-                    self._json({"ok": True})
-                except OSError:
-                    self._json({"ok": False})
+                self._json({"ok": self.state.delete_project(path.rsplit("/", 1)[1])})
             elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}", path):
                 jid = path.rsplit("/", 1)[1]
                 job = self.state.store.get(jid)
@@ -624,7 +1021,56 @@ class Handler(BaseHTTPRequestHandler):
             info = self.state.media_view(self.state.resolve_input(proj["source"]))
         except EditForgeError as exc:
             raise EditForgeError("The video this project was made from is gone.", "Delete this project and start a new one. (" + exc.message + ")")
+        info["where"] = self.state.link_path(proj["source"]) or ""
         return {"project": proj, "info": info}
+
+    def _project_action(self, pid: str, action: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        st = self.state
+        if action == "rename":
+            name = " ".join(str(data.get("name") or "").split())[:80]
+            if not name:
+                raise EditForgeError("The name is empty.", "Type a name.")
+            return st.edit_project(pid, name=name, updated=time.time())
+        if action == "duplicate":
+            return st.duplicate_project(pid)
+        if action == "trash":
+            return st.edit_project(pid, trashed=time.time())
+        if action == "restore":
+            return st.edit_project(pid, trashed=0)
+        # relink: "Find it again" -- choose the moved video (or give a file id the page already has)
+        ident = str(data.get("file") or "")
+        if not ident:
+            try:
+                ident = st.choose("video") or ""
+            except choose_mod.NoDialog:
+                return {"no_dialog": True}
+            if not ident:
+                return {"cancelled": True}
+        src = st.resolve_input(ident)
+        info = probe_media(src)
+        old = st.load_project(pid)
+        want = float((old.get("src") or {}).get("duration") or 0)
+        note = ""
+        if want and abs(info.duration - want) > max(1.0, want * 0.01):
+            note = f"This video is {info.duration:.0f} s long; the old one was {want:.0f} s. Pieces past its end were dropped."
+        old["source"] = ident
+        proj = st.save_project(pid, old, old.get("created"), old)
+        return {"project": proj, "note": note}
+
+    def _file_reply(self, ident: str) -> Dict[str, Any]:
+        """What the page needs to know about a newly linked file."""
+        src = self.state.resolve_input(ident)
+        info = probe_media(src)
+        out = {"id": ident, "name": Path(src).name, "size": os.path.getsize(src), "duration": info.duration, "has_video": info.has_video,
+               "has_audio": info.has_audio, "width": info.width, "height": info.height, "linked": True, "where": src,
+               "subtitles": Path(src).suffix.lower() in SUBTITLE_EXTS}
+        if out["subtitles"]:
+            from ..analysis.speech import import_transcript
+            out["words"] = len(import_transcript(src))
+            if not out["words"]:
+                raise EditForgeError("I could not find any timed lines in that subtitle file.", "Choose a .srt or .vtt file with times.")
+        threading.Thread(target=self.state.after_add, args=(ident,), daemon=True).start()
+        return out
 
     def _new_project(self, data: Dict[str, Any]) -> Dict[str, Any]:
         src_id = str(data.get("source") or "")
@@ -725,7 +1171,7 @@ class Handler(BaseHTTPRequestHandler):
         except (EditForgeError, ValueError):
             self._error(404, "No picture for that.")
             return
-        pic = self.state.thumbnail(src, at)
+        pic = self.state.thumbnail(src, at, 240 if (query.get("h") or [""])[0] == "240" else 96)
         if pic is None:
             self._error(404, "No picture for that.")
             return
@@ -785,11 +1231,17 @@ class Handler(BaseHTTPRequestHandler):
             self._error(404, exc.message, exc.fix)
             return
         path = Path(src)
-        if (query.get("preview") or [""])[0] == "1":
-            path = self.state.previews.path_for(src)
+        kind = (query.get("preview") or [""])[0]
+        if kind in ("1", "q"):
+            path = self.state.previews.path_for(src) if kind == "1" else self.state.previews.quick_path_for(src)
             if not path.is_file():
                 self._error(404, "The preview copy is not ready yet.")
                 return
+            if not self.headers.get("Range", "").startswith("bytes=") or self.headers.get("Range", "").startswith("bytes=0-"):
+                try:
+                    os.utime(path)                 # "last used", for the clean-up of old light copies
+                except OSError:
+                    pass
         size = path.stat().st_size
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         start, end, status = 0, size - 1, 200
@@ -881,6 +1333,7 @@ class Handler(BaseHTTPRequestHandler):
             raise
         self._json({"id": f"u/{uid}/{name}", "name": name, "size": dest.stat().st_size, "duration": info.duration,
                     "has_video": info.has_video, "has_audio": info.has_audio, "width": info.width, "height": info.height}, 201)
+        threading.Thread(target=self.state.after_add, args=(f"u/{uid}/{name}",), daemon=True).start()
 
     def _download(self, job_id: str) -> None:
         if self._guard(query_token=True) is None:
@@ -915,9 +1368,10 @@ class EditForgeServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
-def make_server(host: str = "127.0.0.1", port: int = 0, media_dir: Optional[str] = None, home: Optional[Path] = None) -> Tuple[EditForgeServer, AppState]:
+def make_server(host: str = "127.0.0.1", port: int = 0, media_dir: Optional[str] = None, home: Optional[Path] = None,
+                app_mode: bool = False) -> Tuple[EditForgeServer, AppState]:
     """Create the server (port 0 picks a free port; used by the tests)."""
-    state = AppState(host, port, media_dir, home)
+    state = AppState(host, port, media_dir, home, app_mode)
     handler = type("BoundHandler", (Handler,), {"state": state})
     srv = EditForgeServer((host, port), handler)
     state.port = srv.server_address[1]
@@ -929,7 +1383,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True, 
     srv = None
     for p in range(port, port + 20):
         try:
-            srv, state = make_server(host, p, media_dir)
+            srv, state = make_server(host, p, media_dir, app_mode=True)
             break
         except OSError:
             continue

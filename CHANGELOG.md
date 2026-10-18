@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.0
+* **Also called Nyenz Edit.** The window, Home screen and installer icons say Nyenz Edit (the program file is still EditForge.exe,
+  so updates replace the old version).
+* **Home screen** (CapCut-simple): one big Create project, the three tools, and a projects grid with picture, name and `size | length`,
+  newest opened first. Search, grid or list, Trash (undo, empty), and a menu per project: Open, Rename, Duplicate, Move to trash.
+  A moved or deleted video shows "Video not found" with **Find it again**. The Clips page moved to `/clips`.
+* **No more copies of big videos.** Choose file opens the normal Windows file window and uses the video where it is (linked). Only
+  those exact files may be read. Dropped files are still copied, and that copy is deleted with the last project that uses it.
+  **Storage** panel with Free up buttons; light copies and pictures unused for a month are cleaned up at start.
+* **Steps** in the Editor: pin a result (with hand edits) and add another cut and pattern on top, as many times as you like, with no
+  render in between. Pieces always stay ranges of the original video, so extending a cut reaches the original footage (also what an
+  earlier step removed) and stops at the next piece. Export cuts the last step from the original once. Steps are saved with the
+  project, and can be saved and repeated on another video.
+* **Sound clean-up** (Editor, new Sound panel): remove noise (light, medium, strong), remove voices or keep only voices (stereo), clearer voices,
+  balance quiet and loud parts, bass and treble.
+* **Automatic updates**: a quiet "Update available" button; downloads, checks size and SHA-256, waits for exports, installs silently
+  and reopens. Checks at most once a day, "Skip this version", silent when offline. Releases now carry `EditForge-Setup.exe.sha256`.
+* **Faster:** pages are gzipped and kept by the window until they change (first screen 87 KB to 27 KB); the add-on check no longer
+  loads OpenCV and Whisper (0.19 s to 0.02 s); video facts and fingerprints are remembered (opening a video again: 0.16 s to 0.002 s,
+  autosave 0.08 s to 0.01 s); films with Dolby sound play after a quick copy (5 min 1080p film: 44 s to 8 s); a light copy starts as
+  soon as a video is added; the Exports list asks less often when nothing is being made.
+* Custom dialogs replace the browser's own question boxes. Leaving the Editor right after a change no longer loses it.
+
 ## 1.4.0
 * **New look.** A dark, calm editing-suite design with real icons, custom menus, switches and sliders everywhere (no plain browser
   controls), and an app icon for the window, the taskbar, the desktop and the browser tab.
