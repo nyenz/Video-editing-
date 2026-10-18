@@ -8,7 +8,8 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = [(os.path.join(ROOT, "editforge", "web", "static"), os.path.join("editforge", "web", "static")),
          (os.path.join(ROOT, "examples"), "examples")]
 binaries = []
-hidden = ["editforge.web.server", "editforge.cli.main"]
+hidden = ["editforge.web.server", "editforge.cli.main", "editforge.taskbar",
+          "win32gui", "win32con", "win32process", "pythoncom", "pywintypes", "win32com.propsys.propsys", "win32com.propsys.pscon"]
 ff = os.path.join(SPECPATH, "ffmpeg")
 for exe in ("ffmpeg.exe", "ffprobe.exe"):
     if os.path.exists(os.path.join(ff, exe)):

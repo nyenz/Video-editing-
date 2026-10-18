@@ -39,8 +39,9 @@ Type: files; Name: "{autodesktop}\EditForge.lnk"
 Source: "..\dist\EditForge\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Nyenz Edit"; Filename: "{app}\EditForge.exe"; Comment: "Edit videos on this computer"
-Name: "{autodesktop}\Nyenz Edit"; Filename: "{app}\EditForge.exe"; Tasks: desktopicon; Comment: "Edit videos on this computer"
+; AppUserModelID matches the app window (editforge/taskbar.py), so the window and a pinned button use the Nyenz Edit icon
+Name: "{autoprograms}\Nyenz Edit"; Filename: "{app}\EditForge.exe"; Comment: "Edit videos on this computer"; AppUserModelID: "NyenzEdit.App"
+Name: "{autodesktop}\Nyenz Edit"; Filename: "{app}\EditForge.exe"; Tasks: desktopicon; Comment: "Edit videos on this computer"; AppUserModelID: "NyenzEdit.App"
 
 [Run]
 Filename: "{app}\EditForge.exe"; Description: "Open Nyenz Edit now"; Flags: nowait postinstall skipifsilent

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+* **Own taskbar icon.** The app window was grouped under Microsoft Edge on the taskbar, and pinning it pinned Edge. Now the window has
+  its own taskbar button with the Nyenz Edit icon, separate from your normal Edge windows, and pinning it pins Nyenz Edit.
+  (If you pinned it before, unpin that old Edge button once and pin the new one.)
+
 ## 1.5.0
 * **Also called Nyenz Edit.** The window, Home screen and installer icons say Nyenz Edit (the program file is still EditForge.exe,
   so updates replace the old version).

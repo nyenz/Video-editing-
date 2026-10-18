@@ -446,3 +446,13 @@ def test_vocal_removal_on_mono_sound_is_skipped_with_a_note(media):
         assert plan.timeline.audio.voice is None and any("mono" in w for w in plan.warnings)
     else:
         assert plan.timeline.audio.voice["vocals"] == "remove"
+
+
+def test_taskbar_identity_is_safe_everywhere():
+    from editforge import taskbar
+    said = []
+    taskbar.watch("x", said.append)
+    if not taskbar.supported():
+        assert said and "not supported" in said[0]
+    iss = (ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8")
+    assert iss.count(f'AppUserModelID: "{taskbar.APP_ID}"') == 2        # shortcuts and window share one taskbar identity
