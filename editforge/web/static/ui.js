@@ -183,7 +183,7 @@ function exportsButton() {
 }
 
 // ------------------------------------------------------------------ small dialogs (instead of the browser's own boxes)
-function dialogBox(title, body, buttons) {
+function dialogBox(title, body, buttons, onopen) {
   return new Promise((resolve) => {
     const prev = document.activeElement;
     const done = (v) => { scrim.remove(); dlg.remove(); document.removeEventListener("keydown", key, true); if (prev && prev.focus) prev.focus(); resolve(v); };
@@ -200,6 +200,7 @@ function dialogBox(title, body, buttons) {
     document.addEventListener("keydown", key, true);
     document.body.append(scrim, dlg);
     const f = dlg.querySelector("input") || row.lastChild; if (f) { f.focus(); if (f.select) f.select(); }
+    if (onopen) onopen(done, dlg);
   });
 }
 /** Yes / no question. Resolves true or false. */

@@ -42,6 +42,7 @@ from . import choose as choose_mod
 from .preview import PreviewMaker
 from .. import combine as combine_mod
 from .. import project as project_mod
+from .. import clipsets as clip_mod
 
 STATIC_DIR = Path(__file__).parent / "static"
 JS, CSS = "application/javascript; charset=utf-8", "text/css; charset=utf-8"
@@ -184,8 +185,10 @@ class AppState:
         self.previews = PreviewMaker(self.home / "previews")
         self.projects = self.home / "projects"
         self.thumbs = self.home / "thumbs"
-        for d in (self.projects, self.thumbs):
+        self.clipsets = self.home / "clipsets"
+        for d in (self.projects, self.thumbs, self.clipsets):
             d.mkdir(parents=True, exist_ok=True)
+        self.scenes = clip_mod.SceneFinder(self.home / "scenes", self.fingerprint)
         self.recipes_file = self.home / "recipes.json"
         self._fp_cache: Dict[Tuple[str, int, int], str] = {}
         self._thumb_slots = threading.Semaphore(3)
@@ -451,7 +454,7 @@ class AppState:
         except OSError:
             return False
         m = re.fullmatch(r"u/([0-9a-f]{12})/[^/\\]+", str(proj.get("source") or ""))
-        if m and not any(str(d.get("source")) == proj["source"] for d in self.all_projects()):
+        if m and m.group(1) not in self.used_uploads():
             shutil.rmtree(self.uploads / m.group(1), ignore_errors=True)
         return True
 
@@ -459,6 +462,256 @@ class AppState:
         proj = self.load_project(pid)
         new = dict(proj, id=uuid.uuid4().hex[:12], name=(str(proj.get("name") or "Project")[:74] + " copy"), created=time.time(),
                    updated=time.time(), opened=time.time(), trashed=0)
+        atomic_write_json(self.project_path(new["id"]), new)
+        return new
+
+    # ---- clip projects (phase 1: take clips out of a movie) ---------------------------------------
+    def used_uploads(self) -> set:
+        """Folders of sent-in copies that a project or a clip project still uses."""
+        return {str(d.get("source")).split("/")[1] for d in self.all_projects() + self.all_clipsets()
+                if str(d.get("source")).startswith("u/") and not d.get("freed")}
+
+    def clipset_path(self, cid: str) -> Path:
+        if not re.fullmatch(clip_mod.CLIPSET_ID, cid or ""):
+            raise EditForgeError("That clip project id is not valid.", "Open it from Home.")
+        return self.clipsets / f"{cid}.json"
+
+    def load_clipset(self, cid: str) -> Dict[str, Any]:
+        try:
+            data = json.loads(self.clipset_path(cid).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise EditForgeError("I can't find that clip project any more.", "Open another one from Home.")
+        if not isinstance(data, dict) or not isinstance(data.get("clips"), list):
+            raise EditForgeError("That clip project file is damaged.", "Start a new clip project.")
+        return data
+
+    def all_clipsets(self) -> List[Dict[str, Any]]:
+        out = []
+        for f in self.clipsets.glob("*.json"):
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+                if isinstance(d, dict) and d.get("id") and isinstance(d.get("clips"), list):
+                    out.append(d)
+            except (OSError, ValueError):
+                continue
+        return out
+
+    def source_duration(self, ident: str) -> Optional[float]:
+        """Length of a project's video, or None when it is gone (moved, deleted, or freed)."""
+        try:
+            return probe_media(self.resolve_input(ident)).duration
+        except EditForgeError:
+            return None
+
+    def save_clipset(self, cid: str, raw: Dict[str, Any], old: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        old = old or {}
+        source = str(old.get("source") or raw.get("source") or "")
+        dur = self.source_duration(source)
+        if dur is None and not old:
+            self.resolve_input(source)                       # raises the clear "can't find" message
+        cs = clip_mod.clean_clipset(dict(raw, source=source), dur if dur is not None else 1e9)
+        if dur is None:                                      # the movie is gone: only names may change, never the parts
+            byid = {c["id"]: c for c in old.get("clips") or []}
+            cs["clips"] = [dict(byid[c["id"]], name=c["name"]) for c in cs["clips"] if c["id"] in byid]
+        olds = {c["id"]: c for c in old.get("clips") or [] if isinstance(c, dict)}
+        for c in cs["clips"]:                                # "made" is only ever set here, by the app, never by the page
+            c["made"] = (olds.get(c["id"]) or {}).get("made")
+        now = time.time()
+        src = old.get("src") if isinstance(old.get("src"), dict) else {}
+        if dur is not None:
+            path = self.resolve_input(source)
+            info = probe_media(path)
+            src = {"name": Path(path).name, "size": os.path.getsize(path), "duration": round(info.duration, 3),
+                   "has_video": info.has_video, "path": self.link_path(source) or ""}
+        cs.update({"id": cid, "kind": "clips", "created": float(old.get("created") or now), "updated": now,
+                   "opened": float(old.get("opened") or now), "trashed": float(old.get("trashed") or 0),
+                   "freed": float(old.get("freed") or 0), "src": src})
+        atomic_write_json(self.clipset_path(cid), cs)
+        return cs
+
+    def edit_clipset(self, cid: str, **fields: Any) -> Dict[str, Any]:
+        cs = self.load_clipset(cid)
+        cs.update(fields)
+        atomic_write_json(self.clipset_path(cid), cs)
+        return cs
+
+    def clip_state(self, cs: Dict[str, Any], clip: Dict[str, Any]) -> Dict[str, Any]:
+        """Is this clip made? {'state': 'none'|'queued'|'running'|'done'|'failed'|'old', 'file': id, 'progress', 'error'}."""
+        made = clip.get("made") or {}
+        job = self.store.get(made["job"]) if made.get("job") else None
+        if not job:
+            return {"state": "none", "file": "", "progress": 0.0, "error": "", "size": 0}
+        status = job.get("status")
+        fid = self.output_id(job) or ""
+        out = {"state": status if status in ("queued", "running", "done", "failed") else "failed", "file": fid,
+               "progress": float(job.get("progress") or 0), "error": str(job.get("error") or ""), "size": 0}
+        if status == "done" and not fid:
+            out["state"] = "none"                            # the made file was removed in Exports
+        if fid:
+            try:
+                out["size"] = os.path.getsize(self.resolve_input(fid))
+            except (EditForgeError, OSError):
+                pass
+        if out["state"] == "done" and made.get("key") != clip_mod.clip_key(cs["source"], clip):
+            out["state"] = "old"                             # changed after it was made
+        return out
+
+    def clipset_view(self, cs: Dict[str, Any]) -> Dict[str, Any]:
+        info = None
+        try:
+            path = self.resolve_input(cs["source"])
+            info = self.media_view(path)
+            info["where"] = self.link_path(cs["source"]) or ""
+        except EditForgeError:
+            pass
+        states = {c["id"]: self.clip_state(cs, c) for c in cs["clips"]}
+        return {"clipset": cs, "info": info, "states": states}
+
+    def list_clipsets(self) -> List[Dict[str, Any]]:
+        out = []
+        for d in self.all_clipsets():
+            try:
+                src = d.get("src") if isinstance(d.get("src"), dict) else {}
+                clips = [c for c in d["clips"] if isinstance(c, dict) and c.get("parts")]
+                states = [self.clip_state(d, c)["state"] for c in clips]
+                missing = self.source_duration(str(d["source"])) is None
+                first = clips[0]["parts"][0]["start"] if clips else 0.0
+                made = [c for c, s in zip(clips, states) if s == "done"]
+                thumb_file = self.clip_state(d, made[0])["file"] if made and missing else ""
+                out.append({"id": d["id"], "kind": "clips", "name": d["name"], "source": d["source"],
+                            "source_name": str(d["source"]).rsplit("/", 1)[-1], "clips": len(clips), "made": states.count("done"),
+                            "length": round(sum(clip_mod.clip_length(c) for c in clips), 3), "updated": d.get("updated", 0),
+                            "opened": d.get("opened") or d.get("updated", 0), "trashed": d.get("trashed") or 0,
+                            "freed": d.get("freed") or 0, "missing": missing, "size": int(src.get("size") or 0),
+                            "duration": float(src.get("duration") or 0), "has_video": bool(src.get("has_video", True)),
+                            "thumb_at": round(first + 0.5, 2), "thumb_file": thumb_file})
+            except (KeyError, TypeError, ValueError, IndexError):
+                continue
+        return sorted(out, key=lambda d: d["opened"], reverse=True)
+
+    def delete_clipset(self, cid: str) -> bool:
+        try:
+            cs = self.load_clipset(cid)
+            self.clipset_path(cid).unlink()
+        except (EditForgeError, OSError):
+            return False
+        m = re.fullmatch(r"u/([0-9a-f]{12})/[^/\\]+", str(cs.get("source") or ""))
+        if m and m.group(1) not in self.used_uploads():
+            shutil.rmtree(self.uploads / m.group(1), ignore_errors=True)
+        return True
+
+    def make_clips(self, cid: str, ids: Optional[List[str]] = None) -> List[str]:
+        """Start one export per clip that is not made yet (or changed since). Returns the ids of the clips started."""
+        cs = self.load_clipset(cid)
+        src = self.resolve_input(cs["source"])
+        dur = probe_media(src).duration
+        cs = self.save_clipset(cid, cs, cs)                  # clean it against the movie as it is now
+        stem = Path(src).stem[:40]
+        started = []
+        for clip in cs["clips"]:
+            if ids is not None and clip["id"] not in ids:
+                continue
+            st = self.clip_state(cs, clip)
+            if st["state"] in ("done", "queued", "running"):
+                continue
+            proj = clip_mod.clip_project(cs, clip, dur)
+            project_mod.plan_project(proj, src, stems_home=str(self.home))          # a clear message before anything starts
+            name = clean_filename(f"{stem}_{clip['name']}").rsplit(".", 1)[0][:80]
+            job = self.manager.submit(json.dumps(proj), src, "", {"kind": "project", "preview": False, "music_path": None,
+                                                                 "output_dir": str(self.outputs), "stems_home": str(self.home),
+                                                                 "output_name": name, "clipset": cid, "clip": clip["id"]})
+            clip["made"] = {"job": job, "key": clip_mod.clip_key(cs["source"], clip)}
+            started.append(clip["id"])
+        if not started and not cs["clips"]:
+            raise EditForgeError("There are no clips to make.", "Mark a part, then press Add clip.")
+        atomic_write_json(self.clipset_path(cid), dict(cs, updated=time.time()))
+        return started
+
+    def free_movie(self, cid: str, delete_original: bool) -> Dict[str, Any]:
+        """After every clip is made, the movie is no longer needed. A sent-in copy is deleted; a movie used where it is
+        on the computer is deleted only when the person says so (delete_original)."""
+        cs = self.load_clipset(cid)
+        states = [self.clip_state(cs, c)["state"] for c in cs["clips"]]
+        if not states or any(s != "done" for s in states):
+            raise EditForgeError("Make every clip first.", "Press Make clips and wait until all of them are done.")
+        others = [d for d in self.all_projects() + self.all_clipsets() if d.get("id") != cid and str(d.get("source")) == cs["source"]
+                  and not d.get("trashed") and not d.get("freed")]
+        if others:
+            raise EditForgeError("Another project still uses this movie.", "Delete or finish that project first.")
+        freed = 0
+        try:
+            path = self.resolve_input(cs["source"])
+        except EditForgeError:
+            path = ""
+        if path:
+            size = os.path.getsize(path)
+            try:
+                pv = [self.previews.path_for(path), self.previews.quick_path_for(path)]
+            except OSError:
+                pv = []
+            if cs["source"].startswith("u/"):
+                shutil.rmtree(self.uploads / cs["source"].split("/")[1], ignore_errors=True)
+                freed += size
+            elif cs["source"].startswith("l/"):
+                if not delete_original:
+                    return {"ask": True, "path": path, "size": size}
+                try:
+                    os.remove(path)
+                except OSError as exc:
+                    raise EditForgeError("The movie file could not be deleted: " + str(exc), "Close any program that plays it, then try again.")
+                freed += size
+            else:
+                raise EditForgeError("This movie is not one the app may delete.", "Delete it yourself if you no longer need it.")
+            for f in pv:
+                if f.is_file():
+                    freed += f.stat().st_size
+                    _unlink(f)
+        self.edit_clipset(cid, freed=time.time())
+        return {"freed": freed}
+
+    def made_clips(self) -> List[Dict[str, Any]]:
+        """Every made clip of every clip project (to start an Edit project from one)."""
+        out = []
+        for cs in sorted(self.all_clipsets(), key=lambda d: d.get("opened") or 0, reverse=True):
+            if cs.get("trashed"):
+                continue
+            for c in cs["clips"]:
+                if not isinstance(c, dict) or not c.get("parts"):
+                    continue
+                st = self.clip_state(cs, c)
+                if st["state"] in ("done", "old") and st["file"]:
+                    out.append({"file": st["file"], "name": c.get("name") or "", "clipset": cs["id"], "clipset_name": cs.get("name") or "",
+                                "length": round(clip_mod.clip_length(c), 3), "size": st["size"]})
+        return out
+
+    def final_videos(self) -> List[Dict[str, Any]]:
+        """Phase 3: finished videos made from Edit projects (not quick previews, not clips)."""
+        names = {d["id"]: d.get("name") for d in self.all_projects()}
+        out = []
+        for job in self.store.list(500):
+            opts = job.get("options") if isinstance(job.get("options"), dict) else {}
+            if opts.get("preview") or opts.get("clipset") or opts.get("kind") not in ("project", "combine"):
+                continue
+            fid = self.output_id(job)
+            if not fid:
+                continue
+            f = Path(job["output_path"])
+            res = job.get("result") if isinstance(job.get("result"), dict) else {}
+            pid = str(opts.get("project_id") or "")
+            out.append({"id": fid, "job": job["id"], "name": f.name, "size": f.stat().st_size, "duration": float(res.get("duration") or 0),
+                        "when": float(job.get("updated") or job.get("created") or 0),
+                        "project_id": pid if pid in names else "", "project_name": names.get(pid) or ""})
+        return out
+
+    def fork_project(self, pid: str, step: int) -> Dict[str, Any]:
+        """A new project that starts again from one step (keeps the first pattern cut for another video)."""
+        proj = self.load_project(pid)
+        steps = proj.get("steps") if isinstance(proj.get("steps"), list) else []
+        new = dict(proj, id=uuid.uuid4().hex[:12], created=time.time(), updated=time.time(), opened=time.time(), trashed=0)
+        if 1 <= step <= len(steps):
+            st = steps[step - 1]
+            new.update(pieces=st.get("pieces") or [], rule=st.get("rule"), steps=steps[:step - 1])
+        new["name"] = (str(proj.get("name") or "Project")[:66] + f" from step {step}")
         atomic_write_json(self.project_path(new["id"]), new)
         return new
 
@@ -480,7 +733,7 @@ class AppState:
             free = shutil.disk_usage(self.home).free
         except OSError:
             free = 0
-        used_uploads = {str(d.get("source")).split("/")[1] for d in self.all_projects() if str(d.get("source")).startswith("u/")}
+        used_uploads = self.used_uploads()
         loose = sum(size(d) for d in self.uploads.iterdir() if d.is_dir() and d.name not in used_uploads) if self.uploads.exists() else 0
         return {"sizes": out, "total": sum(out.values()), "free": free, "home": str(self.home), "loose_uploads": loose,
                 "linked": len(self.links)}
@@ -497,7 +750,7 @@ class AppState:
             for f in self.thumbs.glob("*.jpg"):
                 n += _unlink(f)
         elif what == "uploads":                  # copies of videos sent in by dragging, that no project uses
-            used = {str(d.get("source")).split("/")[1] for d in self.all_projects() if str(d.get("source")).startswith("u/")}
+            used = self.used_uploads()
             for d in list(self.uploads.iterdir()):
                 if d.is_dir() and d.name not in used:
                     shutil.rmtree(d, ignore_errors=True)
@@ -524,7 +777,7 @@ class AppState:
         try:
             cutoff = time.time() - days * DAY_SECONDS
             keep = set()
-            for d in self.all_projects():
+            for d in self.all_projects() + self.all_clipsets():
                 try:
                     keep.add(self.fingerprint(self.resolve_input(str(d["source"]))))
                 except Exception:  # noqa: BLE001
@@ -535,7 +788,7 @@ class AppState:
             for f in self.thumbs.glob("*.jpg"):
                 if f.stat().st_mtime < cutoff:
                     _unlink(f)
-            used = {str(d.get("source")).split("/")[1] for d in self.all_projects() if str(d.get("source")).startswith("u/")}
+            used = self.used_uploads()
             for d in self.uploads.iterdir():
                 if d.is_dir() and d.name not in used and d.stat().st_mtime < cutoff:
                     shutil.rmtree(d, ignore_errors=True)
@@ -833,6 +1086,29 @@ class Handler(BaseHTTPRequestHandler):
                 view = self._project_view(self.state.load_project(pid))
                 self.state.edit_project(pid, opened=time.time())
                 self._json(view)
+            elif path == "/api/clipsets":
+                if self._guard() is None:
+                    return
+                self._json({"clipsets": self.state.list_clipsets()})
+            elif re.fullmatch(rf"/api/clipsets/{clip_mod.CLIPSET_ID}", path):
+                if self._guard() is None:
+                    return
+                cid = path.rsplit("/", 1)[1]
+                cs = self.state.edit_clipset(cid, opened=time.time())
+                self._json(self.state.clipset_view(cs))
+            elif path == "/api/scenes":
+                query = self._guard()
+                if query is None:
+                    return
+                self._json(self.state.scenes.status(self.state.resolve_input((query.get("id") or [""])[0])))
+            elif path == "/api/clips/made":
+                if self._guard() is None:
+                    return
+                self._json({"clips": self.state.made_clips()})
+            elif path == "/api/final":
+                if self._guard() is None:
+                    return
+                self._json({"videos": self.state.final_videos()})
             elif path == "/api/storage":
                 if self._guard() is None:
                     return
@@ -938,6 +1214,28 @@ class Handler(BaseHTTPRequestHandler):
                 if data is None:
                     return
                 self._json(self._new_project(data), 201)
+            elif re.fullmatch(rf"/api/projects/{PROJECT_ID}/fork", path):
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json({"project": self.state.fork_project(path.split("/")[3], int(_float(data.get("step"), 1)))}, 201)
+            elif path == "/api/clipsets":
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json(self._new_clipset(data), 201)
+            elif re.fullmatch(rf"/api/clipsets/{clip_mod.CLIPSET_ID}/(rename|trash|restore|make|free)", path):
+                data = self._read_json()
+                if data is None:
+                    return
+                self._json(self._clipset_action(path.split("/")[3], path.split("/")[4], data))
+            elif path == "/api/scenes":
+                data = self._read_json()
+                if data is None:
+                    return
+                src = self.state.resolve_input(str(data.get("id") or ""))
+                info = probe_media(src)
+                self._json(self.state.scenes.start(src, info.duration, info.has_video))
             elif re.fullmatch(rf"/api/projects/{PROJECT_ID}/render", path):
                 data = self._read_json()
                 if data is None:
@@ -1002,6 +1300,10 @@ class Handler(BaseHTTPRequestHandler):
                 old = self.state.load_project(pid)
                 data["source"] = old["source"]          # a project always stays with its own video (Find it again changes it)
                 self._json(self.state.save_project(pid, data, old.get("created"), old))
+            elif re.fullmatch(rf"/api/clipsets/{clip_mod.CLIPSET_ID}", path):
+                cid = path.rsplit("/", 1)[1]
+                old = self.state.load_clipset(cid)
+                self._json(self.state.clipset_view(self.state.save_clipset(cid, data, old)))
             elif path == "/api/recipes":
                 self._json({"recipes": self.state.save_recipes(data)})
             else:
@@ -1016,6 +1318,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if re.fullmatch(rf"/api/projects/{PROJECT_ID}", path):
                 self._json({"ok": self.state.delete_project(path.rsplit("/", 1)[1])})
+            elif re.fullmatch(rf"/api/clipsets/{clip_mod.CLIPSET_ID}", path):
+                self._json({"ok": self.state.delete_clipset(path.rsplit("/", 1)[1])})
             elif re.fullmatch(r"/api/jobs/[0-9a-f]{12}", path):
                 jid = path.rsplit("/", 1)[1]
                 job = self.state.store.get(jid)
@@ -1062,6 +1366,35 @@ class Handler(BaseHTTPRequestHandler):
             raise EditForgeError("The video this project was made from is gone.", "Delete this project and start a new one. (" + exc.message + ")")
         info["where"] = self.state.link_path(proj["source"]) or ""
         return {"project": proj, "info": info}
+
+    def _new_clipset(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        src_id = str(data.get("source") or "")
+        if not src_id:
+            raise EditForgeError("No movie was chosen.", "Choose a movie first.")
+        src = self.state.resolve_input(src_id)
+        info = probe_media(src)
+        if info.duration < 0.5:
+            raise EditForgeError("That file is too short to take clips from.", "Choose a longer video.")
+        name = " ".join(str(data.get("name") or Path(src).stem).split())[:80]
+        cs = self.state.save_clipset(uuid.uuid4().hex[:12], {"name": name, "source": src_id, "clips": []})
+        return self.state.clipset_view(cs)
+
+    def _clipset_action(self, cid: str, action: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        st = self.state
+        if action == "rename":
+            name = " ".join(str(data.get("name") or "").split())[:80]
+            if not name:
+                raise EditForgeError("The name is empty.", "Type a name.")
+            return st.edit_clipset(cid, name=name, updated=time.time())
+        if action == "trash":
+            return st.edit_clipset(cid, trashed=time.time())
+        if action == "restore":
+            return st.edit_clipset(cid, trashed=0)
+        if action == "make":
+            ids = data.get("ids")
+            started = st.make_clips(cid, [str(x) for x in ids] if isinstance(ids, list) else None)
+            return dict(st.clipset_view(st.load_clipset(cid)), started=started)
+        return st.free_movie(cid, bool(data.get("delete_original")))
 
     def _project_action(self, pid: str, action: str, data: Dict[str, Any]) -> Dict[str, Any]:
         st = self.state
@@ -1153,7 +1486,7 @@ class Handler(BaseHTTPRequestHandler):
         else:                                                    # fail early with a clear message (speech recognition is too slow to try here)
             project_mod.plan_project(proj, src, music_path=music_path, captions_path=captions_path, preview=preview,
                                      stems_home=str(self.state.home))
-        opts = {"kind": "project", "preview": preview, "music_path": music_path, "captions_path": captions_path,
+        opts = {"kind": "project", "preview": preview, "music_path": music_path, "captions_path": captions_path, "project_id": pid,
                 "output_dir": str(self.state.outputs), "stems_home": str(self.state.home),
                 "output_name": project_mod.output_stem(proj, src, preview)}
         return self.state.manager.submit(json.dumps(proj), src, "", opts)

@@ -606,10 +606,22 @@ function renderSteps() {
     const det = el("details", { class: "steps-all", open: S.stepsOpen }, el("summary", {}, el("span", { text: "All steps (" + (n + 1) + ")" }), el("span", { class: "note", text: "same original video" }), icon("chev", "chev")),
       list, el("div", { class: "btns" },
         btn("Undo step", { icon: "undo", cls: "ghost sm", title: "Throw away the newest step and edit the one before again", onclick: undoStep }),
-        btn("Save steps", { icon: "bookmark", cls: "ghost sm", title: "Keep these steps to use on another video", onclick: saveSteps })));
+        btn("Save steps", { icon: "bookmark", cls: "ghost sm", title: "Keep these steps to use on another video", onclick: saveSteps }),
+        btn("New video from step " + (S.viewStep === null ? 1 : S.viewStep + 1), { icon: "copy", cls: "ghost sm",
+          title: "Start another project from this step (step 1 is your first pattern cut). This project stays as it is.", onclick: () => forkStep(S.viewStep === null ? 1 : S.viewStep + 1) })));
     det.addEventListener("toggle", () => { S.stepsOpen = det.open; });
     box.append(det);
   }
+}
+/** Keep the first pattern cut (or any pinned step) for another video: a new project that starts from that step. */
+async function forkStep(step) {
+  try {
+    if (S.saveTimer) saveNow();
+    await S.saving;
+    const r = await api("/api/projects/" + S.id + "/fork", { method: "POST", json: { step } });
+    toast("Made '" + r.project.name + "'. Opening it…");
+    setTimeout(() => { location.href = "/edit?p=" + r.project.id; }, 500);
+  } catch (e) { toast(errText(e), true); }
 }
 function showStep(i) {
   if (S.viewStep === i) return;
