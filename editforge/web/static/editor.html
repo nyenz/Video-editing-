@@ -21,6 +21,7 @@
     <button data-panel="audio" title="Music"><i data-ic="music"></i>Audio</button>
     <button data-panel="sound" title="Clean up the sound: noise, voices, balance"><i data-ic="sliders"></i>Sound</button>
     <button data-panel="format" title="Shape and transitions"><i data-ic="ratio"></i>Format</button>
+    <button data-panel="frame" title="Shape, background layer, size, position, turn and mask"><i data-ic="crop"></i>Frame</button>
     <button data-panel="text" title="Words and captions"><i data-ic="type"></i>Text</button>
   </nav>
 
@@ -48,6 +49,10 @@
         <div class="field"><span>Length of each piece</span><div id="cutChips"></div></div>
         <div class="row"><input id="cutSec" class="input short" value="2" inputmode="decimal" aria-label="Seconds per piece"><span class="lbl">seconds</span><span class="grow"></span><button id="cutBtn" class="btn primary"><i data-ic="scissors" class="s"></i><span>Cut</span></button></div>
         <div id="cutNote" class="note" aria-live="polite"></div>
+        <div class="box scene-box">
+          <p class="hint"><b>Cut at scene changes:</b> a piece for every scene (camera change) of the video. Then use Pattern on scenes.</p>
+          <button id="sceneCut" class="btn wide"><i data-ic="split" class="s"></i><span id="sceneCutLabel">Cut at scene changes</span></button>
+        </div>
         <div class="box"><p class="hint"><b>Cut by hand:</b> move the red playhead and press <span class="kbd">S</span> (or the scissors in the timeline) to split the piece under it.</p></div>
       </div>
     </section>
@@ -149,6 +154,12 @@
       </div>
     </section>
 
+    <!-- Frame: canvas shape, background layer, transform, mask -->
+    <section data-for="frame" hidden>
+      <div class="side-h"><h2>Frame</h2></div>
+      <div class="pad" id="framePanel"></div>
+    </section>
+
     <!-- Text -->
     <section data-for="text" hidden>
       <div class="side-h"><h2>Text</h2><button id="addText" class="btn"><i data-ic="plus" class="s"></i><span>Add words</span></button></div>
@@ -231,6 +242,7 @@
 <script src="/static/ui.js"></script>
 <script src="/static/steps.js"></script>
 <script src="/static/layers.js"></script>
+<script src="/static/frame.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

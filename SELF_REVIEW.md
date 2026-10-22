@@ -1,5 +1,18 @@
 # Self review (honest)
 
+## Version 1.8.0 (Frame panel, scene cut) - what was and was not checked
+Checked here (Linux sandbox): a test renders a 9:16 frame with a blurred background and a sharp strip and measures that the strip is sharp
+and the rest blurred; a 16:9 frame with the picture moved right leaves the left edge black; a turned picture with a soft inside-out circle
+mask renders at the right size and length; an unchanged frame is not stored. Steps.cutAt was checked by hand (cuts inside each piece,
+removed pieces skipped). The Frame panel and Cut at scene changes were clicked in headless Chromium (9:16, Strip, Circle, Turn).
+Speed on the 2-core sandbox, 10 s of 1080p: plain 8 s, 9:16 with blur 17 s, with a masked strip 23 s.
+
+NOT checked:
+* Feel of the sliders on a real PC; the live view draws on a canvas and may be slower on weak PCs (the export is not affected).
+* The live blur and the export blur are the same formula but not compared pixel by pixel.
+* The frame is for the whole video, not per piece (CapCut has it per clip; here an Edit project is usually one clip).
+* The "Follow faces" shapes in Format are switched off while a frame is set.
+
 ## Version 1.7.0 (Clips / Edit / Final) - what was and was not checked
 Checked here (Linux sandbox): 7 new tests in `tests/test_v17.py` (cleaning clips and parts, a clip as a project, scenes found in the
 background and kept, making clips from two places checked by the colour of the first and last frame, grey from colour 0, "changed:

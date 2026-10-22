@@ -260,6 +260,69 @@ class ItemBuilder:
             chain += f",pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black"
         return g.add(cur, chain, "fp"), Dims(W, H)
 
+    def _frame(self, g: Graph, cur: str, dims: Dims, n: int) -> Tuple[str, Dims]:
+        """Two layers on a canvas of the chosen shape (like CapCut):
+        below, the same picture filling the canvas (blurred, or black / white);
+        above, the picture fitted, then scaled, moved and turned, and optionally cut to a mask shape with soft edges."""
+        fr = self.out.frame or {}
+        W, H = self.out.width, self.out.height
+        cw, ch = dims.w, dims.h
+        a, b, bg, bg1, bg2, fg, top = (g.label(x) for x in ("ka", "kb", "kg", "kg1", "kg2", "kf", "kt"))
+        g.add_raw(f"[{cur}]split=2[{a}][{b}]")
+        kc = max(W / cw, H / ch)
+        bw, bh = max(W, even(math.ceil(cw * kc))), max(H, even(math.ceil(ch * kc)))
+        back = f"scale={bw}:{bh},crop={W}:{H}"
+        if fr.get("bg") == "blur":
+            sigma = 1.0 + float(fr.get("blur", 50)) / 100.0 * min(W, H) * 0.06
+            back += f",gblur=sigma={sigma:.2f}:steps=2"
+        else:
+            color = "white" if fr.get("bg") == "white" else "black"
+            back += f",drawbox=x=0:y=0:w=iw:h=ih:color={color}@1:t=fill"
+        g.add_raw(f"[{a}]{back},format=yuv420p[{bg}]")
+        k = min(W / cw, H / ch) * float(fr.get("scale", 1.0))
+        fw, fh = max(2, even(cw * k)), max(2, even(ch * k))
+        front = f"scale={fw}:{fh}:flags=lanczos"
+        rot = float(fr.get("rotate", 0.0))
+        if abs(rot) > 0.01:
+            front += f",format=rgba,rotate={math.radians(rot):.6f}:ow=rotw({math.radians(rot):.6f}):oh=roth({math.radians(rot):.6f}):c=0x00000000"
+        g.add_raw(f"[{b}]{front}[{fg}]")
+        dx, dy = float(fr.get("x", 0.0)) * W / 2, float(fr.get("y", 0.0)) * H / 2
+        mask = (fr.get("mask") or {}).get("shape", "none")
+        if mask == "none":
+            g.add_raw(f"[{bg}][{fg}]overlay=x='(W-w)/2+{dx:.1f}':y='(H-h)/2+{dy:.1f}':format=auto,format=yuv420p[{top}]")
+            return top, Dims(W, H)
+        g.add_raw(f"[{bg}]split=2[{bg1}][{bg2}]")
+        sharp, alpha, cut, res = g.label("ks"), g.label("km"), g.label("kc"), g.label("kr")
+        g.add_raw(f"[{bg1}][{fg}]overlay=x='(W-w)/2+{dx:.1f}':y='(H-h)/2+{dy:.1f}':format=auto,format=yuva420p[{sharp}]")
+        g.add_raw(f"{self.mask_source(fr['mask'], W, H, n)}[{alpha}]")
+        g.add_raw(f"[{sharp}][{alpha}]alphamerge[{cut}]")
+        g.add_raw(f"[{bg2}][{cut}]overlay=0:0:format=auto,format=yuv420p[{res}]")
+        return res, Dims(W, H)
+
+    def mask_source(self, m: Dict[str, Any], W: int, H: int, n: int) -> str:
+        """A grey picture (white = the sharp picture shows) drawn ONCE and repeated for ``n`` frames."""
+        cx, cy = float(m.get("x", 0.5)) * W, float(m.get("y", 0.5)) * H
+        hw, hh = max(1.0, float(m.get("w", 0.5)) * W / 2), max(1.0, float(m.get("h", 0.3)) * H / 2)
+        shape = m.get("shape")
+        if shape == "rect":
+            e = f"lte(abs(X-{cx:.1f}),{hw:.1f})*lte(abs(Y-{cy:.1f}),{hh:.1f})"
+        elif shape == "circle":
+            e = f"lte(pow((X-{cx:.1f})/{hw:.1f},2)+pow((Y-{cy:.1f})/{hh:.1f},2),1)"
+        elif shape == "split":
+            e = f"gte(Y,{cy:.1f})"
+        elif shape == "vstrip":
+            e = f"lte(abs(X-{cx:.1f}),{hw:.1f})"
+        else:                                                   # "strip": a band across the whole width
+            e = f"lte(abs(Y-{cy:.1f}),{hh:.1f})"
+        if m.get("invert"):
+            e = f"1-{e}"
+        chain = (f"color=c=black:s={W}x{H}:r={fps_str(self.F)},trim=end_frame=1,format=gray,geq=lum='255*({e})'")
+        feather = float(m.get("feather", 0.0))
+        if feather > 0.5:
+            chain += f",gblur=sigma={feather / 100.0 * min(W, H) * 0.08:.2f}:steps=3"
+        chain += f",loop=loop={max(0, n - 1)}:size=1:start=0,setpts=N/({self.Ff:.9f}*TB)"
+        return chain
+
     def _crop(self, seg: Segment, dims: Dims) -> Optional[Tuple[int, int, int, int]]:
         c = seg.crop
         if c is None:
@@ -402,7 +465,10 @@ class ItemBuilder:
             dims = Dims(w, h)
         elif seg.reframe is not None:
             cur, dims = self._reframe(g, cur, it, dims)
-        cur, dims = self._fit(g, cur, dims)
+        if self.out.frame:
+            cur, dims = self._frame(g, cur, dims, it.n)
+        else:
+            cur, dims = self._fit(g, cur, dims)
         if seg.reverse:
             cur = g.add(cur, "reverse", "rv")
             cur = g.add(cur, "setpts=PTS-STARTPTS", "rz")

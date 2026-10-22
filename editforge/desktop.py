@@ -304,7 +304,7 @@ def selftest() -> int:
         say(_hello(state.port, 5), "web server answers")
         if since is not None:
             _say(f"TIME app start to web server ready: {since + time.perf_counter() - t0:.2f} s")
-        for path, word in (("/", b"home.js"), ("/clips", b"workshop.js"), ("/edit", b"editor.js"), ("/edit", b"steps.js"), ("/edit", b"layers.js"),
+        for path, word in (("/", b"home.js"), ("/clips", b"workshop.js"), ("/edit", b"editor.js"), ("/edit", b"steps.js"), ("/edit", b"layers.js"), ("/edit", b"frame.js"),
                            ("/static/ui.js", b"enhanceSelect")):
             t = time.perf_counter()
             with urllib.request.urlopen(f"http://127.0.0.1:{state.port}{path}", timeout=5) as r:

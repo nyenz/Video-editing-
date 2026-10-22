@@ -71,8 +71,18 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "noise": "off", "vocals": "keep", "voice_boost": False, "compress": False, "bass": 0.0, "treble": 0.0,
     # the three sound layers (voices / music / effects) of a split video: which split to use, and how loud each layer is
     "mix_split": "", "mix_voices": 1.0, "mix_music": 1.0, "mix_effects": 1.0,
+    # the frame: canvas shape, background layer, move / scale / turn, mask (see clean_frame)
+    "frame": None,
 }
 MIX_LAYERS = ("voices", "music", "effects")
+#: the canvas shapes (CapCut's list); "5.8in" is a tall phone screen
+FRAME_RATIOS: Dict[str, Optional[tuple]] = {"original": None, "16:9": (16, 9), "4:3": (4, 3), "2.35:1": (2.35, 1), "2:1": (2, 1),
+                                             "1.85:1": (1.85, 1), "9:16": (9, 16), "3:4": (3, 4), "1:1": (1, 1), "4:5": (4, 5),
+                                             "5.8in": (9, 19.5)}
+FRAME_BGS = ("black", "white", "blur")
+MASK_SHAPES = ("none", "strip", "vstrip", "rect", "circle", "split")
+DEFAULT_FRAME: Dict[str, Any] = {"ratio": "original", "bg": "blur", "blur": 50.0, "scale": 1.0, "x": 0.0, "y": 0.0, "rotate": 0.0,
+                                 "mask": {"shape": "none", "x": 0.5, "y": 0.5, "w": 1.0, "h": 0.35, "feather": 20.0, "invert": False}}
 SPLIT_ID = re.compile(r"^[0-9a-f]{32}/\d{9}-\d{9}$")
 NOISE_LEVELS = {"off": 0.0, "light": 10.0, "medium": 18.0, "strong": 28.0}
 VOCALS = ("keep", "remove", "voice")
@@ -196,7 +206,43 @@ def clean_settings(raw: Any) -> Dict[str, Any]:
     s["mix_split"] = sid if SPLIT_ID.match(sid) else ""
     for layer in MIX_LAYERS:
         s["mix_" + layer] = round(_num(raw.get("mix_" + layer), 1.0, 0.0, 2.0), 3)
+    fr = clean_frame(raw.get("frame")) if isinstance(raw.get("frame"), dict) else None
+    s["frame"] = fr if frame_active(fr) else None
     return s
+
+
+def clean_frame(raw: Any) -> Dict[str, Any]:
+    raw = raw if isinstance(raw, dict) else {}
+    d = DEFAULT_FRAME
+    m_raw = raw.get("mask") if isinstance(raw.get("mask"), dict) else {}
+    dm = d["mask"]
+    return {"ratio": raw.get("ratio") if raw.get("ratio") in FRAME_RATIOS else "original",
+            "bg": raw.get("bg") if raw.get("bg") in FRAME_BGS else d["bg"],
+            "blur": round(_num(raw.get("blur"), d["blur"], 0.0, 100.0), 1),
+            "scale": round(_num(raw.get("scale"), 1.0, 0.1, 4.0), 3),
+            "x": round(_num(raw.get("x"), 0.0, -2.0, 2.0), 4), "y": round(_num(raw.get("y"), 0.0, -2.0, 2.0), 4),
+            "rotate": round(_num(raw.get("rotate"), 0.0, -180.0, 180.0), 2),
+            "mask": {"shape": m_raw.get("shape") if m_raw.get("shape") in MASK_SHAPES else "none",
+                     "x": round(_num(m_raw.get("x"), dm["x"], 0.0, 1.0), 4), "y": round(_num(m_raw.get("y"), dm["y"], 0.0, 1.0), 4),
+                     "w": round(_num(m_raw.get("w"), dm["w"], 0.02, 2.0), 4), "h": round(_num(m_raw.get("h"), dm["h"], 0.02, 2.0), 4),
+                     "feather": round(_num(m_raw.get("feather"), dm["feather"], 0.0, 100.0), 1), "invert": bool(m_raw.get("invert"))}}
+
+
+def frame_active(fr: Optional[Dict[str, Any]]) -> bool:
+    """True when the frame changes anything (a new shape, a moved or scaled picture, or a mask)."""
+    if not fr:
+        return False
+    return (fr["ratio"] != "original" or abs(fr["scale"] - 1) > 1e-3 or abs(fr["x"]) > 1e-4 or abs(fr["y"]) > 1e-4
+            or abs(fr["rotate"]) > 1e-3 or fr["mask"]["shape"] != "none")
+
+
+def frame_size(fr: Dict[str, Any], width: int, height: int, preview: bool) -> tuple:
+    """Canvas size: the long side stays as long as the video's long side (854 in a quick preview)."""
+    r = FRAME_RATIOS[fr["ratio"]]
+    a = r[0] / r[1] if r else width / max(1, height)
+    long = 854 if preview else max(width, height)
+    w, h = (long, long / a) if a >= 1 else (long * a, long)
+    return max(2, int(round(w / 2)) * 2), max(2, int(round(h / 2)) * 2)
 
 
 def clean_project(raw: Any, duration: float) -> Dict[str, Any]:
@@ -466,13 +512,17 @@ def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional
     live = [p for p in project["pieces"] if not p["off"]]
     if not live:
         raise ScriptError("Every piece is removed, so there would be no video left.", "Put at least one piece back.")
-    preset, aspect, follow, fit = SHAPES[st["shape"]]
+    frame = st.get("frame") if media.has_video else None
+    preset, aspect, follow, fit = SHAPES["original" if frame else st["shape"]]
     crf, x264 = QUALITIES[st["quality"]]
     notes: List[str] = list(media.warnings)
     out = resolve_output(media, preset=preset, fit=fit, quality=f"crf:{crf}", preview=preview, notes=notes)
     if not preview:
         out.x264_preset = x264
-    if preview and preset != "original" and out.has_video:      # keep the chosen shape in the small preview
+    if frame and out.has_video:                                # the Frame panel: its own canvas, layers and mask
+        out.width, out.height = frame_size(frame, media.width, media.height, preview)
+        out.fit, out.frame = "frame", dict(frame)
+    elif preview and preset != "original" and out.has_video:      # keep the chosen shape in the small preview
         full = resolve_output(media, preset=preset, fit=fit)
         out.height = 480 if full.height <= full.width else 854
         out.width = int(round(out.height * full.width / full.height / 2)) * 2

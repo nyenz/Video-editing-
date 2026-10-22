@@ -17,6 +17,7 @@ class OutputSpec:
     height: int = 0
     fps: Fraction = field(default_factory=lambda: Fraction(25))
     fit: str = "pad"
+    frame: Optional[Dict[str, Any]] = None   # canvas with a background layer, a moved / scaled / rotated picture and a mask (see project.clean_frame)
     crf: int = 20
     x264_preset: str = "veryfast"
     audio_bitrate: str = "192k"
