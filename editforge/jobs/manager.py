@@ -133,7 +133,7 @@ class JobManager:
                 plan = plan_project(json.loads(job["script"]), job["input_path"], music_path=opts.get("music_path"),
                                     captions_path=opts.get("captions_path"),
                                     preview=bool(opts.get("preview")), output_path=job["output_path"] or None, cancel=cancel,
-                                    log=lambda t: self.store.update(job_id, message=t))
+                                    log=lambda t: self.store.update(job_id, message=t), stems_home=opts.get("stems_home"))
             else:
                 script = read_script(job["script"])
                 plan = prepare(script, input_path=job["input_path"], output_path=job["output_path"] or None, preset=opts.get("preset"),

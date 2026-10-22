@@ -32,6 +32,11 @@ Sandbox: 2 CPUs, Linux, FFmpeg from the system. Film: 5 min, 1920x1080 H.264 wit
 
 The Windows self-test in GitHub Actions prints `TIME` lines (app start to server ready, each page, the add-on check).
 
+## Splitting the sound (version 1.6.0)
+Sandbox: 2 CPUs, Linux, onnxruntime on CPU, 44.1 kHz stereo. A 6-second chunk takes about 10 to 14 s (the GRU layers are 80% of it), so *Fast* mode
+needs about 2 to 2.5 s of work per second of sound; *Best* about 2.6x more. A 14 s synthetic film split in 48 s through the app. Not measured on a Windows PC.
+Quality check (synthetic film with known layers, exported): voices-only export matched the true voices at 0.96 correlation, music-only 0.99, effects-only 0.73.
+
 ## Not measured
 * No comparison with the four older apps was run (they were not available here), so no speed-up claim is made.
 * 4K output: the memory model predicts about 490 MB for one worker; this was not run.

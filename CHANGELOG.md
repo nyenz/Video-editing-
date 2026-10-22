@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0
+* **Split the sound into 3 layers: voices, music, effects** (Editor > Sound > *Split the sound*). A free AI model (BandIt Plus, trained on
+  film-style sound) pulls people talking, music, and effects (gunshots, fights, cars) apart. Runs on your computer; the 76 MB model is
+  downloaded once from GitHub and checked before use. The layers are kept per video, so each video is split only once.
+* **3-layer mixer**: volume 0-200% for each layer, mute, and presets (Everything, Voices only, No voices, No music, Music only, Effects only).
+  You hear it live while playing, and the export uses the same mix. If all three are at 100% the original sound is used untouched.
+* Splits only the part of the video your pieces use (3 s extra on each side), or the whole video. *Fast* (default) or *Best* (about 2.6x slower).
+* Needs the `onnxruntime` add-on (included in the installer).
+
 ## 1.5.1
 * **Own taskbar icon.** The app window was grouped under Microsoft Edge on the taskbar, and pinning it pinned Edge. Now the window has
   its own taskbar button with the Nyenz Edit icon, separate from your normal Edge windows, and pinning it pins Nyenz Edit.

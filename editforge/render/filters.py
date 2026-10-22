@@ -15,6 +15,7 @@ from fractions import Fraction
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..core.errors import ScriptError
+from ..core.ffmpeg import get_tools
 from ..core.media import MediaInfo
 from ..core.model import (CameraSpec, EffectSpec, ImageOverlay, Segment, TextOverlay, Timeline)
 from ..dsl.coerce import color_to_rgba
@@ -128,6 +129,11 @@ class ItemBuilder:
         self.has_audio_out, self.has_video_out = has_audio_out, has_video_out
         self.src_fps = float(media.fps) if media.has_video else self.Ff
         self.guard = 0.25 / self.src_fps
+        # the video's sound can come from its three layers (voices / music / effects) instead of the original track
+        self.mix = tl.audio.mix if (tl.audio.mix and media.has_audio) else None
+        self.layers = [n for n in ("voices", "music", "effects") if float(self.mix["gain"].get(n, 1.0)) > 0.001] if self.mix else []
+        #: how many FFmpeg inputs one item uses: the source, plus one per layer that is heard
+        self.stride = 1 + len(self.layers)
 
     # ---- what to read from the source -------------------------------------------------------
     def source_window(self, it: Item) -> Tuple[float, float]:
@@ -148,9 +154,41 @@ class ItemBuilder:
         a = max(0.0, a - self.guard)
         return a, length + self.guard + 3.0 / self.src_fps
 
-    def input_args(self, it: Item, src: str, dec_threads: int = 1) -> List[str]:
+    def input_args(self, it: Item, src: str, dec_threads: int = 1, extra: float = 0.0) -> List[str]:
         a, length = self.source_window(it)
-        return ["-threads", str(max(1, dec_threads)), "-ss", f"{a:.6f}", "-t", f"{length:.6f}", "-i", src]
+        args = ["-threads", str(max(1, dec_threads)), "-ss", f"{a:.6f}", "-t", f"{length + extra:.6f}", "-i", src]
+        if self.mix:
+            sa = max(0.0, a - float(self.mix["start"]))          # the layer files begin where the split began
+            for name in self.layers:
+                args += ["-threads", "1", "-ss", f"{sa:.6f}", "-t", f"{length + extra:.6f}", "-i", self.mix["files"][name]]
+        return args
+
+    def audio_input(self, g: "Graph", k: int) -> Optional[str]:
+        """The label of the video's sound for item ``k`` (None = silence): the original track, or the mix of the layers."""
+        if not self.media.has_audio:
+            return None
+        base = k * self.stride
+        if not self.mix:
+            return f"{base}:a:0"
+        if not self.layers:
+            return None
+        labels = []
+        loud = False
+        for j, name in enumerate(self.layers):
+            gain = float(self.mix["gain"].get(name, 1.0))
+            loud = loud or gain > 1.0
+            labels.append(g.add(f"{base + 1 + j}:a:0", f"aformat=sample_fmts=fltp:sample_rates={self.sr}:channel_layouts=stereo,volume={gain:.5f}", "sx"))
+        if len(labels) == 1:
+            cur = labels[0]
+        else:
+            cur = g.label("sm")
+            norm = ":normalize=0" if get_tools().amix_normalize else ""
+            g.add_raw("".join(f"[{x}]" for x in labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0{norm}[{cur}]")
+            if not norm:
+                cur = g.add(cur, f"volume={len(labels)}", "sv")
+        if loud:
+            cur = g.add(cur, "asoftclip=type=tanh:threshold=0.95", "sc")     # louder layers must not click when they add up
+        return cur
 
     # ---- video ---------------------------------------------------------------------------------
     def _look(self, g: Graph, cur: str, e: EffectSpec, dims: Dims, item_seconds: float) -> str:

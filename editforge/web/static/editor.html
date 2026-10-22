@@ -101,6 +101,24 @@
     <section data-for="sound" hidden>
       <div class="side-h"><h2>Sound</h2></div>
       <div class="pad">
+          <div class="layers" id="lyBox">
+            <div class="layers-head"><i data-ic="layers"></i><b>Voices, music and effects</b></div>
+            <p class="hint" id="lyHint"></p>
+            <div id="lySplit">
+              <div class="field"><span>Part to split</span><select id="lyPart"><option value="use">The part I use</option><option value="all">The whole video</option></select></div>
+              <div class="field"><span>Quality</span><select id="lyMode"><option value="fast">Fast (recommended)</option><option value="best">Best (a few times slower)</option></select></div>
+              <button class="btn primary wide" id="lyBtn" type="button"><i data-ic="split" class="s"></i><span>Split the sound</span></button>
+            </div>
+            <div id="lyProg" hidden>
+              <div class="prog"><i></i></div>
+              <div class="ly-prog-row"><span class="note" id="lyProgNote"></span><button class="btn ghost" id="lyCancel" type="button">Cancel</button></div>
+            </div>
+            <div id="lyMix" hidden>
+              <div class="chips" id="lyPresets"></div>
+              <div id="lyRows"></div>
+              <button class="btn ghost" id="lyAgain" type="button"><i data-ic="restore" class="s"></i><span>Split again</span></button>
+            </div>
+          </div>
           <div class="field"><span>Remove noise (hiss, hum, wind)</span><select id="sNoise"><option value="off">Off</option><option value="light">Light</option><option value="medium">Medium</option><option value="strong">Strong</option></select></div>
           <div class="field"><span>Voices</span><select id="sVocals"><option value="keep">Keep as they are</option><option value="remove">Remove voices (keep the music)</option><option value="voice">Voices only (drop the music)</option></select></div>
           <label class="swl">Make voices clearer <input type="checkbox" id="sBoost" class="sw"></label>
@@ -212,6 +230,7 @@
 
 <script src="/static/ui.js"></script>
 <script src="/static/steps.js"></script>
+<script src="/static/layers.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

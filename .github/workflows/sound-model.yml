@@ -1,0 +1,99 @@
+# Builds the sound-splitting model once and publishes it as a release file (tag sound-model-1).
+# Nyenz Edit downloads it the first time someone presses "Split the sound", and checks its SHA-256 fingerprint.
+name: Sound model
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/export_sound_model.py
+      - .github/workflows/sound-model.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/export_sound_model.py
+      - .github/workflows/sound-model.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: sound-model-1
+      ASSET: sound-split-1.onnx
+      REPO_SHA: 6fdad13686bb7e84d029ec66f9dbe76e65c93ebf
+      WEIGHTS_SHA: c48284779f7d1258a6527d3aaa18a532d45c1f506e2dcc25d5ab179a8c5e2573
+      CONFIG_SHA: c62d316a8ac066b78120f648665b81d33b507d25e2d9096f048ccc1bd91b1a78
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is the model already published?
+        id: have
+        run: |
+          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$ASSET"; then
+            echo "have=yes" >> "$GITHUB_OUTPUT"; echo "The model is already published; nothing to do."
+          else
+            echo "have=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.have.outputs.have == 'no'
+        with:
+          python-version: "3.12"
+
+      - name: Install the tools (only needed to build the file)
+        if: steps.have.outputs.have == 'no'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install pytorch_lightning torchmetrics spafe einops librosa tqdm pandas onnx onnxruntime pyyaml numpy
+
+      - name: Get the model code and weights (checked against known fingerprints)
+        if: steps.have.outputs.have == 'no'
+        run: |
+          git clone https://github.com/ZFTurbo/Music-Source-Separation-Training src
+          git -C src checkout "$REPO_SHA"
+          base=https://github.com/ZFTurbo/Music-Source-Separation-Training/releases/download/v.1.0.3
+          curl -fsSL -o weights.chpt "$base/model_bandit_plus_dnr_sdr_11.47.chpt"
+          curl -fsSL -o config.yaml "$base/config_dnr_bandit_bsrnn_multi_mus64.yaml"
+          echo "$WEIGHTS_SHA  weights.chpt" | sha256sum -c -
+          echo "$CONFIG_SHA  config.yaml" | sha256sum -c -
+
+      - name: Convert
+        if: steps.have.outputs.have == 'no'
+        shell: bash {0}
+        run: |
+          python -u tools/export_sound_model.py --repo src --weights weights.chpt --config config.yaml --out "$ASSET" > convert.log 2>&1
+          rc=$?
+          tail -n 12 convert.log
+          if [ $rc -ne 0 ]; then echo "::error title=Convert failed (exit $rc)::$(tail -c 1500 convert.log | tr '\n' ' ')"; free -m; exit $rc; fi
+
+      - name: Publish
+        if: steps.have.outputs.have == 'no'
+        shell: bash {0}
+        run: |
+          notes="The AI model that splits a video's sound into voices, music and effects (BandIt Plus by Roman Solovyev / ZFTurbo, trained on the Divide and Remaster data set), converted for onnxruntime by tools/export_sound_model.py. Nyenz Edit downloads it once and checks its SHA-256 fingerprint. This is not an app version: there is nothing to install from here."
+          echo "::notice title=files::$(ls -l | tr '\n' ' ' | cut -c1-900)"
+          sha256sum "$ASSET" > sha.txt; cat sha.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            out=$(gh release upload "$TAG" "$ASSET" --clobber 2>&1); rc=$?
+          else
+            out=$(gh release create "$TAG" "$ASSET" --target "${{ github.event.repository.default_branch }}" --prerelease --title "Sound split model 1 (used by Nyenz Edit)" --notes "$notes" 2>&1); rc=$?
+          fi
+          echo "$out"; echo "::notice title=gh result::rc=$rc $(echo "$out" | tr '\n' ' ' | cut -c1-700)"
+          if [ $rc -ne 0 ]; then echo "::error title=Publish failed::$(echo "$out" | tr '\n' ' ')"; exit $rc; fi
+          { echo "### Sound model published"; cat sha.txt; tail -n 3 convert.log; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the file with this run too
+        if: always() && hashFiles('sound-split-1.onnx') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sound-split-1
+          path: |
+            sound-split-1.onnx
+            sha.txt
+          retention-days: 14

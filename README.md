@@ -105,8 +105,13 @@ Presets: `original`, `youtube_1080p`, `youtube_4k`, `shorts` (also reels, tiktok
 ## Fast cuts or exact cuts?
 Exact (default): frame-accurate, the picture is re-encoded. `--fast-cuts`: no re-encoding, very fast, but each cut moves to the nearest keyframe, so the result can start earlier and end later than you asked, and it cannot be combined with picture changes.
 
+## Split the sound (voices, music, effects)
+Editor > Sound > *Split the sound*. The layers are made once per video and kept; then each layer has its own volume (0-200%) and mute, live while
+you play and in the export. Speed: on a 2-core test machine, about 2 to 2.5 seconds of work per second of sound, so only the part your pieces use is split by default.
+The model is BandIt Plus (ZFTurbo's code, MIT; weights trained on Divide and Remaster), converted to ONNX; see `tools/export_sound_model.py`.
+
 ## Optional add-ons (EditForge works without them and says what is switched off)
-`pip install faster-whisper` (automatic captions; downloads a model file once, then works offline) - `pip install "opencv-python-headless<5"` (following faces and things, face-following re-frame). Run `editforge features` to see what is on.
+`pip install faster-whisper` (automatic captions; downloads a model file once, then works offline) - `pip install "opencv-python-headless<5"` (following faces and things, face-following re-frame). `pip install onnxruntime` (splitting a video's sound into voices, music and effects; downloads a 76 MB model once, then works offline). Run `editforge features` to see what is on.
 
 ## Real limitations
 * Memory stays flat with the number of cuts and was measured under 300 MB up to 1080p; 4K needs more.

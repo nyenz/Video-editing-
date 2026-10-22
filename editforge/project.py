@@ -18,6 +18,7 @@ A project is plain JSON::
 from __future__ import annotations
 
 import math
+import re
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -68,7 +69,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "captions": "off", "caption_style": "karaoke", "caption_position": "bottom", "caption_size": "medium",
     # sound clean-up
     "noise": "off", "vocals": "keep", "voice_boost": False, "compress": False, "bass": 0.0, "treble": 0.0,
+    # the three sound layers (voices / music / effects) of a split video: which split to use, and how loud each layer is
+    "mix_split": "", "mix_voices": 1.0, "mix_music": 1.0, "mix_effects": 1.0,
 }
+MIX_LAYERS = ("voices", "music", "effects")
+SPLIT_ID = re.compile(r"^[0-9a-f]{32}/\d{9}-\d{9}$")
 NOISE_LEVELS = {"off": 0.0, "light": 10.0, "medium": 18.0, "strong": 28.0}
 VOCALS = ("keep", "remove", "voice")
 
@@ -187,6 +192,10 @@ def clean_settings(raw: Any) -> Dict[str, Any]:
             s[key] = bool(raw[key])
     s["bass"] = round(_num(raw.get("bass"), 0.0, -12.0, 12.0), 1)
     s["treble"] = round(_num(raw.get("treble"), 0.0, -12.0, 12.0), 1)
+    sid = str(raw.get("mix_split") or "")
+    s["mix_split"] = sid if SPLIT_ID.match(sid) else ""
+    for layer in MIX_LAYERS:
+        s["mix_" + layer] = round(_num(raw.get("mix_" + layer), 1.0, 0.0, 2.0), 3)
     return s
 
 
@@ -424,10 +433,29 @@ def remap_words(words: Sequence[Word], segments: Sequence[Segment], fps: float) 
     return fixed
 
 
+def _layer_mix(st: Dict[str, Any], live: List[Dict[str, Any]], src_path: str, planner: Any,
+               stems_home: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The sound-layer mix (see splitter.py) when the person changed a layer's loudness, else None (= the original sound)."""
+    gains = {layer: float(st["mix_" + layer]) for layer in MIX_LAYERS}
+    if not st["mix_split"] or all(abs(g - 1.0) < 0.001 for g in gains.values()):
+        return None
+    from .splitter import SplitStore
+    info = SplitStore(stems_home).resolve(st["mix_split"])
+    if not info or info["id"].split("/")[0] != source_identity(src_path)["fp"]:
+        planner.warn("The split sound for this video was not found (it may have been cleaned up), so the original sound is used. "
+                     "Open Sound and press Split.")
+        return None
+    lo, hi = min(p["start"] for p in live), max(p["end"] for p in live)
+    if lo < info["start"] - 0.05 or hi > info["end"] + 0.05:
+        raise ScriptError("Part of your video lies outside the part whose sound was split.",
+                          "Open Sound and press 'Split again' so the whole part you use is covered.")
+    return {"id": info["id"], "start": info["start"], "end": info["end"], "files": info["files"], "gain": gains}
+
+
 def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional[str] = None, captions_path: Optional[str] = None,
                  preview: bool = False,
                  output_path: Optional[str] = None, cancel: Optional[threading.Event] = None,
-                 log: Optional[Callable[[str], None]] = None) -> Plan:
+                 log: Optional[Callable[[str], None]] = None, stems_home: Optional[str] = None) -> Plan:
     """Turn a project into a render :class:`Plan`.
 
     ``project`` must already be cleaned with :func:`clean_project`. ``music_path`` is the real path of the
@@ -505,6 +533,7 @@ def plan_project(project: Dict[str, Any], src_path: str, *, music_path: Optional
         if vocals != "keep" and media.channels < 2:
             planner.warn("Removing or keeping only voices needs stereo sound, and this video's sound is mono, so it was left as it is.")
             vocals = "keep"
+        audio.mix = _layer_mix(st, live, src_path, planner, stems_home)
         voice = {"vocals": vocals, "boost": st["voice_boost"], "compress": st["compress"], "bass": st["bass"], "treble": st["treble"]}
         if vocals != "keep" or st["voice_boost"] or st["compress"] or abs(st["bass"]) >= 0.5 or abs(st["treble"]) >= 0.5:
             audio.voice = voice

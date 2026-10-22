@@ -16,7 +16,7 @@ for exe in ("ffmpeg.exe", "ffprobe.exe"):
         binaries.append((os.path.join(ff, exe), "ffmpeg"))
 
 # Optional add-ons: included when installed in the build environment.
-for pkg in ("faster_whisper", "ctranslate2", "cv2"):
+for pkg in ("faster_whisper", "ctranslate2", "cv2", "onnxruntime"):
     try:
         d, b, h = collect_all(pkg)
         datas += d; binaries += b; hidden += h

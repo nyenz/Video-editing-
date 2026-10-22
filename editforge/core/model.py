@@ -192,6 +192,9 @@ class AudioSpec:
     # sound clean-up of the video's own sound: {"vocals": "keep"|"remove"|"voice", "boost": bool, "compress": bool,
     # "bass": dB, "treble": dB}. Applied after noise removal, before music is mixed in.
     voice: Optional[Dict[str, Any]] = None
+    # the video's own sound rebuilt from its three layers (see splitter.py):
+    # {"start": s, "end": s, "files": {"voices": path, "music": path, "effects": path}, "gain": {"voices": 1.0, ...}}
+    mix: Optional[Dict[str, Any]] = None
     music: List[MusicSpec] = field(default_factory=list)
     fade_in: float = 0.0
     fade_out: float = 0.0
