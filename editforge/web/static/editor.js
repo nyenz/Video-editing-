@@ -164,7 +164,7 @@ function dress(v, p) {
   if (p.color.contrast !== 1) f.push("contrast(" + p.color.contrast + ")");
   if (p.color.saturation !== 1) f.push("saturate(" + p.color.saturation + ")");
   v.style.filter = f.join(" ");
-  v.muted = S.mutedAll || p.mute || !S.proj.settings.original_sound;
+  v.muted = S.mutedAll || p.mute || !S.proj.settings.original_sound || Layers.on();     // with the three layers on, they carry the sound
   v.volume = clamp(p.volume, 0, 1);
   v.playbackRate = clamp(p.speed, 0.0625, 16);
 }
@@ -203,12 +203,12 @@ function play() {
   const v = active(); dress(v, at.s.p); badge(at.s.p);
   v.currentTime = at.s.p.start + (S.t - at.s.out0) * at.s.p.speed;
   const pr = v.play(); if (pr && pr.catch) pr.catch(() => {});
-  prepNext(at.s); musicPlay();
+  prepNext(at.s); musicPlay(); Layers.play();
   cancelAnimationFrame(V.raf); V.raf = requestAnimationFrame(tick);
 }
 function pause() {
   S.playing = false; setPlayIcon();
-  V.a.pause(); V.b.pause(); $("music").pause();
+  V.a.pause(); V.b.pause(); $("music").pause(); Layers.pause();
   cancelAnimationFrame(V.raf);
 }
 function togglePlay() { if (S.playing) pause(); else play(); }
@@ -231,6 +231,7 @@ function tick() {
     } else { dress(v, nx.p); v.currentTime = nx.p.start; }
     badge(nx.p); prepNext(nx);
   }
+  Layers.follow(active(), V.seg.p);
   renderPlayhead(); renderOverlay();
   if (S.followPlay) scrollToPlayhead();
   V.raf = requestAnimationFrame(tick);
@@ -529,6 +530,7 @@ function openPanel(name) {
   for (const s of document.querySelectorAll("#left > section")) s.hidden = s.dataset.for !== name;
   if (name === "pattern") renderPattern();
   if (name === "text") renderTexts();
+  if (name === "sound") Layers.open();
 }
 // --- Cut
 /** Step 1: the whole parent video cut into pieces of `sec` seconds. */
@@ -1006,7 +1008,7 @@ async function openProject() {
       if (st.state === "failed") banner("A light copy could not be made: " + st.error, 0);
     }, true, () => { if (!S.info.plays_in_browser) { quick = true; swap(mediaUrl(S.proj.source, "q")); } }).then((ok) => { if (ok) { const t = S.t; V.src = ""; setSource(mediaUrl(S.proj.source, true)); S.t = t; for (const v of [V.a, V.b]) v.addEventListener("loadeddata", () => showFrame(), { once: true }); banner(null); } });
   }
-  bindSettings(); fillSettings();
+  bindSettings(); fillSettings(); Layers.init();
   sizeFrame(); new ResizeObserver(() => { sizeFrame(); renderTimeline(); }).observe($("stage"));
   setTimeout(fitZoom, 0);
   refreshAll();

@@ -1,5 +1,20 @@
 # Self review (honest)
 
+## Version 1.6.0 (split the sound into voices / music / effects) - what was and was not checked
+Checked here (Linux sandbox): 14 new tests in `tests/test_v16.py` (chunk cross-fades add back to the input, cancel, the stored layers and
+their lookup, the job, API, serving, render with each layer on/off measured on tones, cuts and speed, footage outside the split range, missing
+split falling back to the original sound). The ONNX model was converted from the PyTorch weights and compared with the original network
+(mask difference <= 0.0066). With the real model on a 14 s synthetic film (speech-like tones, music, effects) the exports matched the true
+layers: voices only 0.96, music only 0.99, effects only 0.73. The whole flow was driven in headless Chromium (split, presets, live playback in sync, export).
+
+NOT checked:
+* **Real films.** Only a synthetic test film was split. How clean voices vs effects separate on real movie sound is not judged.
+* Speed on a real Windows PC (about 2 to 2.5 s of work per second of sound on the 2-core sandbox).
+* The Windows build with onnxruntime inside the installer, and the model download from the real GitHub release on a PC.
+* *Best* mode quality on real films; GPU/DirectML is not used.
+* Live preview of the layers uses three audio players kept in sync with the picture; small drift (up to 0.15 s) is corrected by jumping, which may be audible.
+* The export adds a start offset of about 10 ms with a layer mix compared to the original sound path.
+
 ## Version 1.5.0 (Home, linked files, steps, sound clean-up, updates) - what was and was not checked
 Checked here (Linux sandbox): 740+ tests pass, 21 new ones in `tests/test_v15.py` (gzip and caching, the add-on check not loading
 OpenCV/Whisper, remembered video facts, quick copy before the light copy, linked files incl. refused ids and restart, projects list /

@@ -304,7 +304,7 @@ def selftest() -> int:
         say(_hello(state.port, 5), "web server answers")
         if since is not None:
             _say(f"TIME app start to web server ready: {since + time.perf_counter() - t0:.2f} s")
-        for path, word in (("/", b"home.js"), ("/clips", b"workshop.js"), ("/edit", b"editor.js"), ("/edit", b"steps.js"),
+        for path, word in (("/", b"home.js"), ("/clips", b"workshop.js"), ("/edit", b"editor.js"), ("/edit", b"steps.js"), ("/edit", b"layers.js"),
                            ("/static/ui.js", b"enhanceSelect")):
             t = time.perf_counter()
             with urllib.request.urlopen(f"http://127.0.0.1:{state.port}{path}", timeout=5) as r:
@@ -341,6 +341,12 @@ def selftest() -> int:
         _say(f"OK   captions add-on (loads in {time.perf_counter() - t:.2f} s, only when used)")
     except Exception as exc:  # noqa: BLE001
         _say("INFO captions add-on not included: " + str(exc))
+    t = time.perf_counter()
+    try:
+        import onnxruntime  # noqa: F401
+        _say(f"OK   sound-splitting add-on (loads in {time.perf_counter() - t:.2f} s, only when used)")
+    except Exception as exc:  # noqa: BLE001
+        _say("INFO sound-splitting add-on not included: " + str(exc))
     _say("ALL OK" if ok else "SOME CHECKS FAILED")
     return 0 if ok else 1
 

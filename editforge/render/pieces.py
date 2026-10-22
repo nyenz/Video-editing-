@@ -130,6 +130,7 @@ def piece_key(job: PieceJob, ctx: RenderContext) -> str:
         "caps": cap, "fade": [tl.audio.fade_in, tl.audio.fade_out, tl.audio.fade_video, tl.audio.fade_color, tl.total_frames],
         "font": ctx.font_local and os.path.basename(ctx.font_local),
         "src_dims": [ctx.media.width, ctx.media.height, str(ctx.media.fps), ctx.media.has_audio],
+        "mix": tl.audio.mix,
     }
     return stable_hash(spec)
 
@@ -160,15 +161,15 @@ def build_piece_command(job: PieceJob, ctx: RenderContext) -> BuiltCommand:
     want_v, want_a = ctx.has_video_out, ctx.has_audio_out
     for it in job.items:
         args += b.input_args(it, ctx.src, min(2, ctx.threads))
-    n_inputs = len(job.items)
+    n_inputs = len(job.items) * b.stride
     vlabels: List[str] = []
     alabels: List[str] = []
     for k, it in enumerate(job.items):
         if want_v:
-            vlabels.append(b.video_chain(g, f"{k}:v:0", it))
+            vlabels.append(b.video_chain(g, f"{k * b.stride}:v:0", it))
         if want_a:
             m = samples_at(it.g0 + it.n, F, ctx.sr) - samples_at(it.g0, F, ctx.sr)
-            alabels.append(b.audio_chain(g, f"{k}:a:0" if ctx.media.has_audio else None, it, m if job.kind == "clips" else job.a_samples))
+            alabels.append(b.audio_chain(g, b.audio_input(g, k), it, m if job.kind == "clips" else job.a_samples))
     vcur = acur = None
     if job.kind == "join":
         assert job.join is not None
@@ -272,8 +273,8 @@ def build_copy_audio_command(job: PieceJob, ctx: RenderContext, samples: int) ->
     g = Graph(f"c{job.index}")
     it = job.items[0]
     a, length = b.source_window(it)
-    args = ["-y", "-ss", f"{a:.6f}", "-t", f"{length + 1:.6f}", "-i", ctx.src]
-    lab = b.audio_chain(g, "0:a:0" if ctx.media.has_audio else None, it, samples)
+    args = ["-y"] + b.input_args(it, ctx.src, 1, extra=1.0)
+    lab = b.audio_chain(g, b.audio_input(g, 0), it, samples)
     gname = f"g{job.index}_{job.key[:8]}.txt"
     files = {gname: g.text()}
     outp = ["-map", f"[{lab}]", "-c:a", "pcm_s16le", "-ar", str(ctx.sr), "-ac", "1" if ctx.layout == "mono" else "2",

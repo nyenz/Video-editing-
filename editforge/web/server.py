@@ -11,6 +11,7 @@ Safety rules:
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import re
@@ -44,7 +45,7 @@ from .. import project as project_mod
 
 STATIC_DIR = Path(__file__).parent / "static"
 JS, CSS = "application/javascript; charset=utf-8", "text/css; charset=utf-8"
-STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "steps.js": JS, "combine.js": JS,
+STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "steps.js": JS, "layers.js": JS, "combine.js": JS,
                 "home.js": JS, "logo.svg": "image/svg+xml", "logo.png": "image/png"}
 _STATIC: Dict[str, Tuple[int, bytes, bytes, str]] = {}          # name -> (mtime, body, gzipped body, etag)
 _STATIC_REF = re.compile(r'(/static/([\w.]+))(?=")')
@@ -205,6 +206,8 @@ class AppState:
         self.quit_app = lambda: None                   # the desktop app closes itself here (after an update)
         from ..updater import Updater
         self.updater = Updater(self.home)
+        from ..splitter import Splitter
+        self.splitter = Splitter(self.home)            # splits a video's sound into voices / music / effects (nothing is loaded until used)
         if app_mode:
             self.updater.clean()
             self.updater.check_in_background()
@@ -471,7 +474,7 @@ class AppState:
                         pass
             return total
         parts = {"uploads": self.uploads, "previews": self.previews.folder, "exports": self.outputs, "thumbs": self.thumbs,
-                 "work": self.home / "work"}
+                 "work": self.home / "work", "stems": self.splitter.store.root, "models": self.home / "models"}
         out = {k: size(v) for k, v in parts.items()}
         try:
             free = shutil.disk_usage(self.home).free
@@ -498,6 +501,13 @@ class AppState:
             for d in list(self.uploads.iterdir()):
                 if d.is_dir() and d.name not in used:
                     shutil.rmtree(d, ignore_errors=True)
+                    n += 1
+        elif what == "stems":                    # split sound layers that no saved project uses (made again when needed)
+            used = {str((d.get("settings") or {}).get("mix_split") or "") for d in self.all_projects()}
+            busy = self.splitter.status().get("state") in ("downloading", "running")
+            for item in self.splitter.store.all():
+                if item["id"] not in used and not busy:
+                    self.splitter.store.delete(item["id"])
                     n += 1
         elif what == "work":
             if not any(j["status"] in ("queued", "running") for j in self.store.list(200)):
@@ -614,6 +624,14 @@ def _jobs_busy(state: "AppState") -> bool:
         return any(j["status"] in ("queued", "running") for j in state.store.list(200))
     except Exception:  # noqa: BLE001
         return False
+
+
+def _float(value: Any, default: float) -> float:
+    try:
+        v = float(value)
+        return v if math.isfinite(v) else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _unlink(p: Path) -> int:
@@ -791,6 +809,15 @@ class Handler(BaseHTTPRequestHandler):
                 if query is None:
                     return
                 self._json(self.state.previews.status(self.state.resolve_input((query.get("id") or [""])[0])))
+            elif path == "/api/split":
+                query = self._guard()
+                if query is None:
+                    return
+                src = self.state.resolve_input((query.get("id") or [""])[0])
+                dur = probe_media(src).duration
+                a = _float((query.get("start") or ["0"])[0], 0.0)
+                b = _float((query.get("end") or [str(dur)])[0], dur)
+                self._json(self.state.splitter.info(src, a, min(b, dur) if b > 0 else dur))
             elif path == "/media":
                 self._media()
             elif path == "/thumb":
@@ -894,6 +921,18 @@ class Handler(BaseHTTPRequestHandler):
                 if data is None:
                     return
                 self._json(self.state.start_preview(self.state.resolve_input(str(data.get("input", "")))), 202)
+            elif path == "/api/split":
+                data = self._read_json()
+                if data is None:
+                    return
+                src = self.state.resolve_input(str(data.get("input", "")))
+                self._json(self.state.splitter.start(src, _float(data.get("start"), 0.0), _float(data.get("end"), 0.0),
+                                                     "best" if data.get("mode") == "best" else "fast"), 202)
+            elif path == "/api/split/cancel":
+                if self._read_json() is None:
+                    return
+                self.state.splitter.cancel()
+                self._json({"ok": True})
             elif path == "/api/projects":
                 data = self._read_json()
                 if data is None:
@@ -1112,9 +1151,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise EditForgeError("Automatic captions need the free 'faster-whisper' add-on, which is not installed.",
                                      "Install it with:  pip install faster-whisper   -- or add a subtitle file (.srt) instead.")
         else:                                                    # fail early with a clear message (speech recognition is too slow to try here)
-            project_mod.plan_project(proj, src, music_path=music_path, captions_path=captions_path, preview=preview)
+            project_mod.plan_project(proj, src, music_path=music_path, captions_path=captions_path, preview=preview,
+                                     stems_home=str(self.state.home))
         opts = {"kind": "project", "preview": preview, "music_path": music_path, "captions_path": captions_path,
-                "output_dir": str(self.state.outputs),
+                "output_dir": str(self.state.outputs), "stems_home": str(self.state.home),
                 "output_name": project_mod.output_stem(proj, src, preview)}
         return self.state.manager.submit(json.dumps(proj), src, "", opts)
 
@@ -1225,13 +1265,22 @@ class Handler(BaseHTTPRequestHandler):
         query = self._guard(query_token=True)
         if query is None:
             return
-        try:
-            src = self.state.resolve_input((query.get("id") or [""])[0])
-        except EditForgeError as exc:
-            self._error(404, exc.message, exc.fix)
-            return
-        path = Path(src)
-        kind = (query.get("preview") or [""])[0]
+        layer = (query.get("layer") or [""])[0]
+        if layer:                                   # one sound layer (voices / music / effects) of a split video
+            from ..splitter import LAYERS
+            found = self.state.splitter.store.resolve((query.get("split") or [""])[0])
+            if not found or layer not in LAYERS:
+                self._error(404, "That sound layer was not found.", "Open Sound and press Split.")
+                return
+            src, path, kind = found["files"][layer], Path(found["files"][layer]), ""
+        else:
+            try:
+                src = self.state.resolve_input((query.get("id") or [""])[0])
+            except EditForgeError as exc:
+                self._error(404, exc.message, exc.fix)
+                return
+            path = Path(src)
+            kind = (query.get("preview") or [""])[0]
         if kind in ("1", "q"):
             path = self.state.previews.path_for(src) if kind == "1" else self.state.previews.quick_path_for(src)
             if not path.is_file():
@@ -1243,7 +1292,7 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
         size = path.stat().st_size
-        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        ctype = "audio/flac" if path.suffix == ".flac" else (mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         start, end, status = 0, size - 1, 200
         rng = self.headers.get("Range")
         if rng:
