@@ -11,15 +11,20 @@
 </head>
 <body>
 <div id="suite" class="suite clips">
-  <aside class="side left" aria-label="Videos">
-    <div class="side-h"><h2>Videos</h2></div>
+  <!-- left: the clips of this project -->
+  <aside class="side left" aria-label="Clips">
+    <div class="side-h"><h2>Clips</h2><span class="note num" id="clipTotals"></span></div>
     <div class="pad">
-      <div id="drop" class="drop" tabindex="0" role="button" aria-label="Choose a video">
-        <i data-ic="folder"></i><b>Choose file</b><span class="hint">Used where it is, nothing is copied. (Dropping a file here sends a copy.)</span>
-      </div>
-      <div id="uploadProg" class="prog" hidden><i></i></div>
-      <span id="uploadNote" class="note" aria-live="polite"></span>
-      <div id="fileList" class="list"></div>
+      <label class="field"><span>Project name</span><input id="csName" class="input" maxlength="80"></label>
+      <button class="btn wide" id="newClip" type="button" title="Start a new clip: mark a part, then press Add as new clip"><i data-ic="plus" class="s"></i><span>New clip</span></button>
+      <div id="clips" class="list cliplist"></div>
+    </div>
+    <div class="make-box" id="makeBox">
+      <div class="stat"><span class="lbl" id="makeWhat">Not made yet</span><b class="num" id="makeLen"></b></div>
+      <div id="makeProg" class="prog" hidden><i></i></div>
+      <button class="btn primary wide" id="makeBtn" type="button"><i data-ic="export" class="s"></i><span id="makeLabel">Save &amp; make clips</span></button>
+      <button class="btn wide" id="freeBtn" type="button" hidden><i data-ic="disk" class="s"></i><span>Free up the movie</span></button>
+      <span id="makeNote" class="note" aria-live="polite"></span>
     </div>
   </aside>
 
@@ -29,7 +34,8 @@
       <div class="frame" id="frame">
         <video id="player" playsinline preload="auto"></video>
         <div class="badge" id="selBadge" hidden></div>
-        <div class="empty" id="empty"><i data-ic="film"></i><b>Choose a video on the left</b><span class="hint">Then mark the parts you want as clips.</span></div>
+        <div class="empty" id="empty"><i data-ic="film"></i><b id="emptyTitle">Opening…</b><span class="hint" id="emptyHint"></span>
+          <div class="btns" id="emptyBtns"></div></div>
       </div>
     </div>
     <div class="transport">
@@ -43,43 +49,62 @@
       </div>
       <div class="row tr-right">
         <button class="btn ghost icon" id="tMute" title="Sound on / off"><i data-ic="vol"></i></button>
-        <button class="btn" id="toEditor" title="Cut this whole video into pieces and edit them"><i data-ic="layers"></i>Edit whole video</button>
+        <button class="btn" id="playClip" title="Play the chosen clip, all its parts in order (P)"><i data-ic="play" class="s"></i><span>Play clip</span></button>
       </div>
     </div>
   </main>
 
-  <aside class="side right" aria-label="Clips">
-    <div class="side-h"><h2>Mark a clip</h2><span class="note num" id="selLenTop"></span></div>
-    <div class="pad">
+  <!-- right: the chosen clip -->
+  <aside class="side right" aria-label="Clip">
+    <div class="side-h"><h2 id="clipHead">Mark a part</h2><span class="note num" id="clipLen"></span></div>
+    <div class="tabs" id="clipTabs" role="tablist"></div>
+    <div class="pad" data-tab="parts">
+      <label class="field" id="clipNameBox" hidden><span>Clip name</span><input id="clipName" class="input" maxlength="60"></label>
       <div class="grid2">
-        <button class="btn" id="setStart" title="Mark the start here (I)"><i data-ic="mark"></i>Start here</button>
-        <button class="btn" id="setEnd" title="Mark the end here (O)"><i data-ic="mark"></i>End here</button>
+        <button class="btn" id="setStart" title="Mark the start here (I)"><i data-ic="inp"></i>Start here</button>
+        <button class="btn" id="setEnd" title="Mark the end here (O)"><i data-ic="outp"></i>End here</button>
         <label class="field"><span>Start</span><input id="startIn" class="input" inputmode="decimal" autocomplete="off" placeholder="0:00"></label>
         <label class="field"><span>End</span><input id="endIn" class="input" inputmode="decimal" autocomplete="off" placeholder="0:00"></label>
       </div>
-      <div class="box">
-        <div class="stat"><span class="lbl">Length</span><b id="selLen">–</b></div>
-      </div>
-      <div class="btns">
-        <button class="btn" id="playSel"><i data-ic="play"></i>Play it</button>
-        <button class="btn primary grow" id="addClip" title="Add to the list (Enter)"><i data-ic="plus"></i>Add clip</button>
+      <div class="box"><div class="stat"><span class="lbl">Marked</span><b id="selLen" class="num">–</b></div></div>
+      <div class="field">
+        <button class="btn primary wide" id="addNew" title="Make a new clip from the marked part (Enter)"><i data-ic="plus" class="s"></i><span>Add as new clip</span></button>
+        <button class="btn wide" id="addPart" title="Add the marked part to the chosen clip (A)"><i data-ic="split" class="s"></i><span id="addPartLabel">Add part to this clip</span></button>
+        <button class="btn ghost wide" id="playSel"><i data-ic="play" class="s"></i><span>Play the marked part</span></button>
       </div>
       <span id="markNote" class="note" aria-live="polite"></span>
+      <div class="field" id="partsBox" hidden><span>Parts of this clip, played in this order</span><div id="parts" class="list"></div></div>
+      <p class="hint">A clip can have parts from different places in the movie, for example a scene, then a moment from later. Tip: press <b>Find scenes</b> under the timeline, then click a scene to mark it.</p>
     </div>
-    <div class="side-h"><h2>Clips</h2><span class="note num" id="clipTotals"></span></div>
-    <div class="pad">
-      <div id="clips" class="list"></div>
-      <div id="makeBox" hidden>
-        <div class="field"><span>Quality</span><div id="quality"></div></div>
-        <div class="box">
-          <div class="stat"><span class="lbl" id="makeWhat">All clips</span><b id="makeLen">–</b></div>
+    <div class="pad" data-tab="video" hidden>
+      <p class="hint" id="noClipV">Choose or add a clip first.</p>
+      <div id="videoBox">
+        <div class="field"><span>Brightness <b class="num" id="vBriV"></b></span><input type="range" id="vBri" class="rng" min="-0.5" max="0.5" step="0.01"></div>
+        <div class="field"><span>Contrast <b class="num" id="vConV"></b></span><input type="range" id="vCon" class="rng" min="0.5" max="2" step="0.01"></div>
+        <div class="field"><span>Colour <b class="num" id="vSatV"></b></span><input type="range" id="vSat" class="rng" min="0" max="2" step="0.01"></div>
+        <div class="field"><span>Speed <b class="num" id="vSpdV"></b></span><div id="vSpeed"></div></div>
+        <div class="field"><span>Shape</span><select id="vShape">
+          <option value="original">Original</option><option value="vertical">Tall 9:16 (cut to fit)</option><option value="vertical_blur">Tall 9:16 with blurred sides</option>
+          <option value="square">Square 1:1 (cut to fit)</option><option value="square_blur">Square 1:1 with blurred sides</option></select></div>
+        <button class="btn ghost" id="vReset" type="button"><i data-ic="restore" class="s"></i><span>Reset picture</span></button>
+        <p class="hint">Brightness, contrast and colour show live in the viewer. The shape shows in the made clip.</p>
+      </div>
+    </div>
+    <div class="pad" data-tab="sound" hidden>
+      <p class="hint" id="noClipS">Choose or add a clip first.</p>
+      <div id="soundBox">
+        <label class="swl">Sound off <input type="checkbox" id="aMute" class="sw"></label>
+        <div class="field"><span>Volume <b class="num" id="aVolV"></b></span><input type="range" id="aVol" class="rng" min="0" max="4" step="0.05"></div>
+        <div class="grid2">
+          <label class="field"><span>Fade in (s)</span><input id="aFin" class="input" inputmode="decimal"></label>
+          <label class="field"><span>Fade out (s)</span><input id="aFout" class="input" inputmode="decimal"></label>
         </div>
-        <div class="btns">
-          <button class="btn primary grow" id="joinBtn"><i data-ic="combine"></i><span id="joinLabel">Join into one video</span></button>
-          <button class="btn grow" id="sepBtn"><i data-ic="copy"></i><span id="sepLabel">Separate videos</span></button>
-        </div>
-        <span id="makeNote" class="note" aria-live="polite"></span>
-        <p class="hint">Clips are cut from your original video, exact to the frame. Tick clips to join or make only those.</p>
+        <div class="field"><span>Remove noise</span><div id="aNoise"></div></div>
+        <label class="swl">Clearer voices <input type="checkbox" id="aVoice" class="sw"></label>
+        <label class="swl">Even out quiet and loud <input type="checkbox" id="aComp" class="sw"></label>
+        <div class="field"><span>Bass <b class="num" id="aBassV"></b></span><input type="range" id="aBass" class="rng" min="-12" max="12" step="1"></div>
+        <div class="field"><span>Treble <b class="num" id="aTrebV"></b></span><input type="range" id="aTreb" class="rng" min="-12" max="12" step="1"></div>
+        <p class="hint">Volume up to 100% and Sound off are heard live; the rest is in the made clip.</p>
       </div>
     </div>
   </aside>
@@ -87,18 +112,21 @@
   <section class="tl" id="tl" aria-label="Timeline">
     <div class="tl-resize" id="tlResize" title="Drag to resize"></div>
     <div class="tl-bar">
-      <div class="info"><span>Video <b id="iLen">0:00</b></span><span id="iSel"></span><span><b id="iCount">0</b> clips</span></div>
+      <div class="info"><span>Movie <b id="iLen">0:00</b></span><span id="iSel"></span><span><b id="iCount">0</b> clips</span></div>
+      <button class="btn sm" id="sceneBtn" type="button" title="Find where the scenes change"><i data-ic="split" class="s"></i><span id="sceneLabel">Find scenes</span></button>
+      <label class="swl inline" title="Marks jump to the nearest scene change">Snap to scenes <input type="checkbox" id="snap" class="sw" checked></label>
       <span class="grow"></span>
-      <span class="hint">Drag on the strip to mark a part · drag the edges to change it</span>
+      <span class="hint">Drag on the strip to mark · click a scene to mark it</span>
       <button class="btn ghost icon" id="bZoomOut" title="Zoom out (-)"><i data-ic="zout"></i></button>
       <input type="range" id="zoom" class="rng zoom" min="0" max="100" step="1" aria-label="Timeline zoom">
       <button class="btn ghost icon" id="bZoomIn" title="Zoom in (+)"><i data-ic="zin"></i></button>
-      <button class="btn ghost icon" id="bFit" title="Fit the whole video"><i data-ic="fit"></i></button>
+      <button class="btn ghost icon" id="bFit" title="Fit the whole movie"><i data-ic="fit"></i></button>
     </div>
     <div class="tl-scroll" id="tlScroll">
       <div class="tl-inner" id="tlInner">
         <div class="ruler" id="ruler"></div>
         <div class="lane" id="laneV"><div class="strip-all" id="stripAll"></div><div class="mark-sel" id="markSel" hidden><div class="h l" data-edge="s"></div><span id="markLen"></span><div class="h r" data-edge="e"></div></div></div>
+        <div class="lane small scenes" id="laneS"></div>
         <div class="lane small" id="laneC"></div>
         <div class="playhead" id="playhead"></div>
       </div>

@@ -105,6 +105,13 @@ Presets: `original`, `youtube_1080p`, `youtube_4k`, `shorts` (also reels, tiktok
 ## Fast cuts or exact cuts?
 Exact (default): frame-accurate, the picture is re-encoded. `--fast-cuts`: no re-encoding, very fast, but each cut moves to the nearest keyframe, so the result can start earlier and end later than you asked, and it cannot be combined with picture changes.
 
+## How the work flows: Clips, Edit, Final
+1. **Clips** (Home, first tab): New clip project, choose a movie. Mark a part (drag on the strip, or Start here / End here, or click a scene
+   after Find scenes) and press Add as new clip. Add more parts to the same clip from other places with Add part. Set its Video and Sound.
+   Press **Save & make clips**. When all are made, **Free up the movie** to get the space back.
+2. **Edit** (second tab): From a made clip, cut into pieces, patterns, steps, sound and look. New video from step 1 keeps your first cut for another video.
+3. **Final** (third tab): your exported videos.
+
 ## Split the sound (voices, music, effects)
 Editor > Sound > *Split the sound*. The layers are made once per video and kept; then each layer has its own volume (0-200%) and mute, live while
 you play and in the export. Speed: on a 2-core test machine, about 2 to 2.5 seconds of work per second of sound, so only the part your pieces use is split by default.

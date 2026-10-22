@@ -1,4 +1,4 @@
-; Inno Setup recipe for EditForge-Setup.exe. Build with:  iscc /DMyVersion=1.6.0 packaging\installer.iss
+; Inno Setup recipe for EditForge-Setup.exe. Build with:  iscc /DMyVersion=1.7.0 packaging\installer.iss
 ; It installs for the current user only, so Windows does not ask for an administrator password.
 #ifndef MyVersion
   #define MyVersion "0.0.0"

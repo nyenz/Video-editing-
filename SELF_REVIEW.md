@@ -1,5 +1,18 @@
 # Self review (honest)
 
+## Version 1.7.0 (Clips / Edit / Final) - what was and was not checked
+Checked here (Linux sandbox): 7 new tests in `tests/test_v17.py` (cleaning clips and parts, a clip as a project, scenes found in the
+background and kept, making clips from two places checked by the colour of the first and last frame, grey from colour 0, "changed:
+make again", freeing a linked movie only after yes, freeing a sent-in copy, another project blocking it, a made clip opened in Edit
+and its export listed as Final, New video from step 1). The whole flow was clicked through in headless Chromium with a 30 s WebM movie
+(Home tabs, create, Find scenes, scene click, two-part clip, Video and Sound tabs, Play clip, make, watch, free, From a made clip).
+
+NOT checked:
+* A real 2-hour movie: Find scenes reads the whole movie once (at small size); its speed on your PC is not measured.
+* Deleting a movie that is used where it is was tried on Linux only, not on Windows (a movie open in another program cannot be deleted there).
+* Clip projects made before this version: the old Clips page kept its clips in the browser; those are not moved over.
+* The live viewer shows brightness, contrast, colour, speed, volume up to 100% and sound off; noise, voices, bass, treble, fades and shape are only in the made clip.
+
 ## Version 1.6.0 (split the sound into voices / music / effects) - what was and was not checked
 Checked here (Linux sandbox): 14 new tests in `tests/test_v16.py` (chunk cross-fades add back to the input, cancel, the stored layers and
 their lookup, the job, API, serving, render with each layer on/off measured on tones, cuts and speed, footage outside the split range, missing

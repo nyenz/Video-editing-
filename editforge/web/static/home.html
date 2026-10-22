@@ -22,16 +22,19 @@
   <main class="home-main">
     <div class="home-top" id="homeTop"></div>
 
-    <section class="create" id="create" tabindex="0" role="button" aria-label="Create project">
-      <span class="create-plus"><i data-ic="plus"></i></span>
-      <span class="create-t"><b>Create project</b><span>Choose a video. It is used where it is, nothing is copied.</span></span>
-      <div id="createProg" class="prog" hidden><i></i></div>
-    </section>
+    <div class="phases" id="phases" role="tablist" aria-label="Phases"></div>
 
-    <div class="tools" id="tools"></div>
+    <div class="create-row" id="createRow">
+      <section class="create" id="create" tabindex="0" role="button" aria-label="Create project">
+        <span class="create-plus"><i data-ic="plus"></i></span>
+        <span class="create-t"><b id="createTitle">New clip project</b><span id="createLine">Choose a movie. It is used where it is, nothing is copied.</span></span>
+        <div id="createProg" class="prog" hidden><i></i></div>
+      </section>
+      <button class="create-side" id="fromClip" type="button" hidden><i data-ic="scissors" class="l"></i><b>From a made clip</b><span>Edit one of your clips</span></button>
+    </div>
 
     <div class="proj-bar">
-      <h2 id="projTitle">Projects</h2>
+      <h2 id="projTitle">Clip projects</h2>
       <span class="note num" id="projCount"></span>
       <span class="grow"></span>
       <label class="search"><i data-ic="search" class="s"></i><input id="search" class="input slim" placeholder="Search" aria-label="Search projects"></label>

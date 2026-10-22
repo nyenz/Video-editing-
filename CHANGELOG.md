@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.0
+* **Three phases on Home: Clips, Edit, Final.** Each tab has its own projects (and its own trash).
+* **Clip projects (phase 1).** Choose a movie and take as many clips out of it as you like. A clip can have **several parts** from
+  different places (a scene, then a moment from later), played in the order you choose. Each clip has its own **Video** settings
+  (brightness, contrast, colour, speed, shape) and **Sound** settings (volume, sound off, fade in/out, noise, clearer voices, even loudness,
+  bass, treble). Saved in the app a moment after every change.
+* **Find scenes**: the scene changes are found once and shown under the timeline. Click a scene to mark it, double-click to add it.
+  Marks snap to scene changes (switch it off with Snap to scenes).
+* **Save & make clips** makes every clip into its own small video. A changed clip shows "Changed: make again".
+* **Free up the movie**: when all clips are made, the movie is no longer needed. A sent-in copy is deleted; a movie used where it is on
+  your computer is deleted only after you say yes. The clips stay.
+* **Edit (phase 2)**: "From a made clip" starts an edit project from a clip. In Steps, **New video from step 1** starts another project
+  from your first pattern cut (this project stays as it is).
+* **Final (phase 3)**: the videos you export from Edit, with Watch, Save a copy, Open its project and Remove.
+
 ## 1.6.0
 * **Split the sound into 3 layers: voices, music, effects** (Editor > Sound > *Split the sound*). A free AI model (BandIt Plus, trained on
   film-style sound) pulls people talking, music, and effects (gunshots, fights, cars) apart. Runs on your computer; the 76 MB model is
