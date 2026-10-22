@@ -65,7 +65,12 @@ jobs:
 
       - name: Convert
         if: steps.have.outputs.have == 'no'
-        run: python tools/export_sound_model.py --repo src --weights weights.chpt --config config.yaml --out "$ASSET" | tee convert.log
+        shell: bash {0}
+        run: |
+          python -u tools/export_sound_model.py --repo src --weights weights.chpt --config config.yaml --out "$ASSET" > convert.log 2>&1
+          rc=$?
+          tail -n 12 convert.log
+          if [ $rc -ne 0 ]; then echo "::error title=Convert failed (exit $rc)::$(tail -c 1500 convert.log | tr '\n' ' ')"; free -m; exit $rc; fi
 
       - name: Publish
         if: steps.have.outputs.have == 'no'
