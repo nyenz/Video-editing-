@@ -100,6 +100,11 @@ def test_the_ai_model_file_runs_through_onnxruntime(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------- the job and the store
+@pytest.fixture(autouse=True)
+def _stand_in_model_size(monkeypatch):
+    monkeypatch.setattr(S, "MODEL_SIZE", 0)          # the tests use stand-in model files, not the real 76 MB one
+
+
 def make_splitter(tmp_path):
     fake = tmp_path / "models" / S.MODEL_FILE
     fake.parent.mkdir(parents=True, exist_ok=True)
