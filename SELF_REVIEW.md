@@ -10,7 +10,7 @@ layers: voices only 0.96, music only 0.99, effects only 0.73. The whole flow was
 NOT checked:
 * **Real films.** Only a synthetic test film was split. How clean voices vs effects separate on real movie sound is not judged.
 * Speed on a real Windows PC (about 2 to 2.5 s of work per second of sound on the 2-core sandbox).
-* The Windows build with onnxruntime inside the installer, and the model download from the real GitHub release on a PC.
+* The Windows build with onnxruntime inside the installer. (The model download from the real GitHub release was tried from the Linux sandbox: size and SHA-256 match, output identical to the locally converted model. Not tried on a Windows PC.)
 * *Best* mode quality on real films; GPU/DirectML is not used.
 * Live preview of the layers uses three audio players kept in sync with the picture; small drift (up to 0.15 s) is corrected by jumping, which may be audible.
 * The export adds a start offset of about 10 ms with a layer mix compared to the original sound path.
