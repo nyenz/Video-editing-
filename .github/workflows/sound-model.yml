@@ -71,9 +71,23 @@ jobs:
         if: steps.have.outputs.have == 'no'
         run: |
           notes="The AI model that splits a video's sound into voices, music and effects (BandIt Plus by Roman Solovyev / ZFTurbo, trained on the Divide and Remaster data set), converted for onnxruntime by tools/export_sound_model.py. Nyenz Edit downloads it once and checks its SHA-256 fingerprint. This is not an app version: there is nothing to install from here."
+          sha256sum "$ASSET" | tee sha.txt; ls -l "$ASSET"
+          set +e
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ASSET" --clobber
+            out=$(gh release upload "$TAG" "$ASSET" --clobber 2>&1); rc=$?
           else
-            gh release create "$TAG" "$ASSET" --target main --prerelease --latest=false --title "Sound split model 1 (used by Nyenz Edit)" --notes "$notes"
+            out=$(gh release create "$TAG" "$ASSET" --target "${{ github.event.repository.default_branch }}" --prerelease --title "Sound split model 1 (used by Nyenz Edit)" --notes "$notes" 2>&1); rc=$?
           fi
-          { echo "### Sound model published"; tail -n 3 convert.log; } >> "$GITHUB_STEP_SUMMARY"
+          echo "$out"
+          if [ $rc -ne 0 ]; then echo "::error title=Publish failed::$(echo "$out" | tr '\n' ' ')"; exit $rc; fi
+          { echo "### Sound model published"; cat sha.txt; tail -n 3 convert.log; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the file with this run too
+        if: always() && hashFiles('sound-split-1.onnx') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sound-split-1
+          path: |
+            sound-split-1.onnx
+            sha.txt
+          retention-days: 14
