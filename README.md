@@ -112,6 +112,11 @@ Exact (default): frame-accurate, the picture is re-encoded. `--fast-cuts`: no re
 2. **Edit** (second tab): From a made clip, cut into pieces, patterns, steps, sound and look. New video from step 1 keeps your first cut for another video.
 3. **Final** (third tab): your exported videos.
 
+## Frame: shape, layers, size, position, mask
+Editor > **Frame**. Pick a shape (16:9, 9:16, 1:1, 4:5, 2.35:1 and more). The background layer is the same video, blurred (or black/white).
+The video layer on top can be made bigger or smaller, moved and turned. A mask (strip, rectangle, circle, split) with soft edges shows the
+video layer only inside it. Editor > Cut > **Cut at scene changes** gives one piece per scene.
+
 ## Split the sound (voices, music, effects)
 Editor > Sound > *Split the sound*. The layers are made once per video and kept; then each layer has its own volume (0-200%) and mute, live while
 you play and in the export. Speed: on a 2-core test machine, about 2 to 2.5 seconds of work per second of sound, so only the part your pieces use is split by default.

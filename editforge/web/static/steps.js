@@ -40,6 +40,22 @@
     return out;
   }
 
+  /** Cut the kept pieces at these times of the parent video (scene changes). Every new piece is its own pattern unit. */
+  function cutAt(pieces, times) {
+    const ts = times.slice().sort((a, b) => a - b), out = [];
+    let unit = 0;
+    for (const p of pieces.filter((q) => !q.off)) {
+      const inner = ts.filter((t) => t > p.start + SNAP && t < p.end - SNAP);
+      const edges = [p.start].concat(inner, [p.end]);
+      const parts = [];
+      for (let i = 0; i + 1 < edges.length; i++) { const q = copy(p); q.start = r4(edges[i]); q.end = r4(edges[i + 1]); q.off = false; parts.push(q); }
+      if (p.reverse) parts.reverse();
+      for (const q of parts) { if (q.end - q.start >= MIN) { q.unit = unit++; out.push(q); } }
+    }
+    if (out.length > 5000) throw new Error("That would make " + out.length + " pieces (the most is 5,000).");
+    return out;
+  }
+
   /** The pattern number of each piece: neighbours with the same unit count as one piece. */
   function units(pieces) {
     const out = []; let n = -1, prev;
@@ -74,7 +90,7 @@
     return bits.join(" · ") || "Whole video";
   }
 
-  const api = { recut, units, patternHits, countUnits, extendLimits, stepLength, ruleText, outLen };
+  const api = { recut, cutAt, units, patternHits, countUnits, extendLimits, stepLength, ruleText, outLen };
   root.Steps = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

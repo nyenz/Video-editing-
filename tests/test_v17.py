@@ -247,3 +247,66 @@ def test_new_video_from_step_one_keeps_the_first_cut(web, media):
     assert new["rule"]["action"] == "remove"
     _, again = c.json("GET", "/api/projects/" + proj["id"])
     assert len(again["project"]["steps"]) == 1 and len(again["project"]["pieces"]) == 1           # the old project is untouched
+
+
+# ------------------------------------------------------------------ 1.8: the frame (canvas, background layer, transform, mask)
+def _gray(path, t, w, h):
+    raw = subprocess.run([FFMPEG, "-v", "error", "-ss", str(t), "-i", path, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                         capture_output=True, check=True).stdout
+    return [raw[i * w:(i + 1) * w] for i in range(h)]
+
+
+def _detail(rows, y0, y1):
+    """How much the picture changes from pixel to pixel in rows y0..y1 (sharp = high, blurred = low)."""
+    tot = n = 0
+    for r in rows[y0:y1]:
+        for x in range(1, len(r)):
+            tot += abs(r[x] - r[x - 1]); n += 1
+    return tot / max(1, n)
+
+
+def _render(c, fid, frame, tmp=None):
+    _, v = c.json("POST", "/api/projects", {"source": fid, "interval": 0})
+    proj = v["project"]
+    proj["settings"] = dict(proj["settings"], frame=frame)
+    _, saved = c.json("PUT", "/api/projects/" + proj["id"], proj)
+    status, job = c.json("POST", f"/api/projects/{proj['id']}/render", {"preview": False})
+    assert status in (200, 201), job
+    end = time.time() + 90
+    while time.time() < end:
+        _, jobs = c.json("GET", "/api/jobs")
+        j = next(x for x in jobs["jobs"] if x["id"] == job["id"])
+        if j["status"] in ("done", "failed"):
+            break
+        time.sleep(0.3)
+    assert j["status"] == "done", j
+    return saved, j["output_path"]
+
+
+def test_frame_tall_canvas_blurred_background_and_a_sharp_masked_strip(web, tmp_path):
+    c, state = web
+    src = tmp_path / "busy.mp4"
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=2", "-f", "lavfi", "-i",
+                    "sine=duration=2", "-vf", "noise=alls=60:allf=t", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src)], check=True)
+    fid = c.upload(str(src))
+    frame = {"ratio": "9:16", "bg": "blur", "blur": 80, "scale": 2.0, "mask": {"shape": "strip", "y": 0.5, "h": 0.3, "feather": 0}}
+    saved, out = _render(c, fid, frame)
+    assert saved["settings"]["frame"]["ratio"] == "9:16"
+    info = probe_media(out)
+    assert (info.width, info.height) == (360, 640)
+    rows = _gray(out, 1.0, 360, 640)
+    middle, top = _detail(rows, 280, 360), _detail(rows, 20, 120)
+    assert middle > 3 * top, (middle, top)              # the strip is sharp, the rest is the blurred layer
+    # a plain move: with a black background the left edge is black when the picture moves right
+    saved, out2 = _render(c, fid, {"ratio": "16:9", "bg": "black", "scale": 0.5, "x": 0.5})
+    rows = _gray(out2, 1.0, 640, 360)
+    assert max(rows[180][:150]) < 30 and max(rows[180][330:600]) > 60
+    # turned by 90 degrees with a circle mask and soft edges: it renders, the size is the canvas
+    saved, out3 = _render(c, fid, {"ratio": "1:1", "rotate": 90, "mask": {"shape": "circle", "w": 0.6, "h": 0.6, "feather": 40, "invert": True}})
+    i3 = probe_media(out3)
+    assert (i3.width, i3.height) == (640, 640) and abs(i3.duration - 2.0) < 0.15
+    # nothing changed: no frame is stored (the original shape is used)
+    _, v = c.json("POST", "/api/projects", {"source": fid, "interval": 0})
+    p = v["project"]; p["settings"]["frame"] = {"ratio": "original"}
+    _, s = c.json("PUT", "/api/projects/" + p["id"], p)
+    assert s["settings"]["frame"] is None

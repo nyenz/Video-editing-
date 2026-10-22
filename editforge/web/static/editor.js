@@ -131,6 +131,7 @@ function onVideoError() {
 }
 V.a.addEventListener("error", onVideoError); V.b.addEventListener("error", onVideoError);
 function frameAspect() {
+  if (Frame.active(S.proj.settings.frame)) return Frame.aspect(S.proj.settings.frame);
   const sh = S.proj.settings.shape || "original";
   const base = sh.split("_")[0];
   return SHAPES[base] || (S.info.width && S.info.height ? S.info.width / S.info.height : 16 / 9);
@@ -144,6 +145,9 @@ function sizeFrame() {
   const sh = S.proj.settings.shape || "original";
   const fit = sh === "original" || sh.endsWith("_blur") ? "contain" : "cover";
   for (const v of [V.a, V.b]) v.style.objectFit = fit;
+  const fr = Frame.active(S.proj.settings.frame) ? Frame.full(S.proj.settings.frame) : null;
+  if (fr) { $("shapeTag").textContent = "Frame " + (fr.ratio === "original" ? "original shape" : fr.ratio) + (fr.mask.shape !== "none" ? " · mask" : ""); renderOverlay(); Frame.show(); return; }
+  Frame.show();
   $("shapeTag").textContent = { original: "Original shape", vertical: "Tall 9:16", vertical_follow: "Tall 9:16 · follows faces", vertical_blur: "Tall 9:16 · blurred edges", square: "Square", square_follow: "Square · follows faces", square_blur: "Square · blurred edges" }[sh] || "";
   renderOverlay();
 }
@@ -531,6 +535,8 @@ function openPanel(name) {
   if (name === "pattern") renderPattern();
   if (name === "text") renderTexts();
   if (name === "sound") Layers.open();
+  if (name === "frame") Frame.renderPanel();
+  if (name === "format") renderShape();
 }
 // --- Cut
 /** Step 1: the whole parent video cut into pieces of `sec` seconds. */
@@ -553,6 +559,26 @@ function cutInto(sec) {
   if (!change(() => { S.proj.pieces = pieces; S.proj.rule = { interval: sec, group: 1, picks: [], action: "", hand: false }; S.sel.clear(); S.t = 0; })) return;
   $("cutNote").textContent = Steps.countUnits(pieces) + " pieces of " + sec + " s" + (stepBase() ? ", cut from step " + S.proj.steps.length + "." : ".") + " Undo brings back the old cut.";
   fitZoom();
+}
+/** The scene separator: one piece per scene (the scene changes are found once per video and kept). */
+async function cutAtScenes() {
+  const label = $("sceneCutLabel"), b = $("sceneCut");
+  b.disabled = true;
+  try {
+    let st = await api("/api/scenes", { method: "POST", json: { id: S.proj.source } });
+    while (st.state === "running") {
+      label.textContent = "Finding scenes… " + Math.round(st.progress * 100) + "%";
+      await new Promise((r) => setTimeout(r, 800));
+      st = await api("/api/scenes?id=" + encodeURIComponent(S.proj.source));
+    }
+    if (st.state !== "ready") throw new Error(st.error || "The scenes could not be found.");
+    const base = stepBase() || [blankPiece(0, S.info.duration)];
+    const pieces = Steps.cutAt(base, st.scenes).map(fixPiece);
+    if (!change(() => { S.proj.pieces = pieces; S.proj.rule = { interval: 0, group: 1, picks: [], action: "", hand: true }; S.sel.clear(); S.t = 0; })) return;
+    $("cutNote").textContent = Steps.countUnits(pieces) + " scenes" + (stepBase() ? " in step " + S.proj.steps.length : "") + ". Undo brings back the old cut.";
+    fitZoom();
+  } catch (e) { $("cutNote").textContent = errText(e); }
+  finally { b.disabled = false; label.textContent = "Cut at scene changes"; }
 }
 // --- Pattern
 const P = { group: 3, picks: new Set([1]) };
@@ -784,6 +810,7 @@ function renderShape() {
     box.append(el("button", { type: "button", class: "mode" + (base === k ? " on" : ""), onclick: () => setShape(k, fill) }, el("span", { class: "pic-box" }, pic), el("b", { text: name })));
   }
   const fb = $("shapeFill"); fb.replaceChildren();
+  if (Frame.active(S.proj.settings.frame)) { fb.append(el("p", { class: "hint", text: "The Frame panel sets the shape now (" + Frame.full(S.proj.settings.frame).ratio + "). Reset the frame there to use these." })); return; }
   if (base !== "original") fb.append(segmented([["middle", "Crop"], ["blur", "Whole + blur"], ["follow", "Follow face"]], fill, (v) => setShape(base, v)));
   else fb.append(el("p", { class: "hint", text: "The original keeps the whole picture." }));
 }
@@ -1021,6 +1048,11 @@ async function openProject() {
     }, true, () => { if (!S.info.plays_in_browser) { quick = true; swap(mediaUrl(S.proj.source, "q")); } }).then((ok) => { if (ok) { const t = S.t; V.src = ""; setSource(mediaUrl(S.proj.source, true)); S.t = t; for (const v of [V.a, V.b]) v.addEventListener("loadeddata", () => showFrame(), { once: true }); banner(null); } });
   }
   bindSettings(); fillSettings(); Layers.init();
+  Frame.init({ host: $("frame"), video: active, srcAspect: S.info.width && S.info.height ? S.info.width / S.info.height : 16 / 9, get: () => S.proj.settings.frame,
+    set: (fr, live) => {
+      if (live) { S.proj.settings.frame = fr; sizeFrame(); return; }
+      change(() => { S.proj.settings.frame = fr; }, { keepVideo: true }); sizeFrame();
+    } });
   sizeFrame(); new ResizeObserver(() => { sizeFrame(); renderTimeline(); }).observe($("stage"));
   setTimeout(fitZoom, 0);
   refreshAll();
@@ -1043,6 +1075,7 @@ function wire() {
   // cut
   const chips = segmented([[1, "1 s"], [2, "2 s"], [3, "3 s"], [5, "5 s"], [10, "10 s"]], 2, (v) => { $("cutSec").value = String(v); });
   $("cutChips").append(chips);
+  $("sceneCut").addEventListener("click", cutAtScenes);
   $("cutBtn").addEventListener("click", async () => {
     if (locked()) { lockedNote(); return; }
     const sec = parseFloat(String($("cutSec").value).replace(",", "."));

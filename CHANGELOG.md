@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.0
+* **Frame panel in the Editor** (new button on the left): everything about the picture's place, like CapCut.
+  * **Shape of the video:** Original, 16:9, 4:3, 2.35:1, 2:1, 1.85:1, 9:16, 3:4, 1:1, 4:5 and 5.8-inch (tall phone).
+  * **Two layers.** Background layer: the same video filling the frame, **blurred** (strength 0-100%), or black or white.
+    Video layer on top: **size** (10-400%), **left/right**, **up/down**, **turn** (-180 to 180°), and Fit / Fill / Center / Straight.
+  * **Mask** on the video layer: Strip, Side strip, Rectangle, Circle or Split, with size, position, **soft edges** (edge blending
+    0-100%) and inside out. The blurred layer shows around it.
+  * The viewer shows it live; the export draws it in full quality (a 1080x1920 frame from 1080p).
+* **Cut at scene changes** (Editor > Cut): one piece per scene, so a pattern can work on scenes. Works on later steps too.
+
 ## 1.7.0
 * **Three phases on Home: Clips, Edit, Final.** Each tab has its own projects (and its own trash).
 * **Clip projects (phase 1).** Choose a movie and take as many clips out of it as you like. A clip can have **several parts** from

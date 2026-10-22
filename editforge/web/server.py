@@ -46,7 +46,7 @@ from .. import clipsets as clip_mod
 
 STATIC_DIR = Path(__file__).parent / "static"
 JS, CSS = "application/javascript; charset=utf-8", "text/css; charset=utf-8"
-STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "steps.js": JS, "layers.js": JS, "combine.js": JS,
+STATIC_FILES = {"ui.css": CSS, "ui.js": JS, "app.js": JS, "workshop.js": JS, "editor.js": JS, "steps.js": JS, "layers.js": JS, "frame.js": JS, "combine.js": JS,
                 "home.js": JS, "logo.svg": "image/svg+xml", "logo.png": "image/png"}
 _STATIC: Dict[str, Tuple[int, bytes, bytes, str]] = {}          # name -> (mtime, body, gzipped body, etag)
 _STATIC_REF = re.compile(r'(/static/([\w.]+))(?=")')
